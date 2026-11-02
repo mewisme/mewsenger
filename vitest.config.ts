@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     include: [
       "src-tauri/src/**/*.test.mjs",
+      "scripts/**/*.test.mjs",
       "src/**/*.{test,spec}.{ts,tsx}",
     ],
     environment: "node",

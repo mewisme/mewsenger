@@ -58,6 +58,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify application version
+        run: pnpm version:check
+
       - name: Run JavaScript tests
         run: pnpm test
 

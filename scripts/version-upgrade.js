@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { setRustPackageVersion, verifyRepository } from './verify-version.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -13,21 +14,28 @@ const __dirname = dirname(__filename);
 const packageJsonPath = join(process.cwd(), 'package.json');
 const versionLockPath = join(process.cwd(), '.version-lock');
 const tauriConfigPath = join(process.cwd(), 'src-tauri', 'tauri.conf.json');
+const rustManifestPath = join(process.cwd(), 'src-tauri', 'Cargo.toml');
 
 // Read current version from package.json
-const packageJson = process.env.CURRENT_VERSION ? process.env.CURRENT_VERSION : JSON.parse(readFileSync(packageJsonPath, 'utf8'));
-let [major, minor, patch] = packageJson.version.split('.').map(Number);
+const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+let [major, minor, patch] = (process.env.CURRENT_VERSION || packageJson.version).split('.').map(Number);
 
 // Function to update Tauri config version
 function updateTauriConfig(version) {
-  try {
-    const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, 'utf8'));
-    tauriConfig.version = version;
-    writeFileSync(tauriConfigPath, JSON.stringify(tauriConfig, null, 2) + '\n');
-    console.log('Updated Tauri config version');
-  } catch (error) {
-    console.error('Error updating Tauri config:', error.message);
-  }
+  const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, 'utf8'));
+  tauriConfig.version = version;
+  writeFileSync(tauriConfigPath, JSON.stringify(tauriConfig, null, 2) + '\n');
+  console.log('Updated Tauri config version');
+}
+
+function updateRustManifest(version) {
+  const original = readFileSync(rustManifestPath, 'utf8');
+  writeFileSync(rustManifestPath, setRustPackageVersion(original, version));
+  // Cargo owns the generated lockfile entry.
+  execSync('cargo metadata --offline --no-deps --format-version 1', {
+    cwd: join(process.cwd(), 'src-tauri'),
+    stdio: 'ignore',
+  });
 }
 
 // Get the last processed commit hash
@@ -206,6 +214,8 @@ if (newVersion) {
 
   // Update Tauri config version
   updateTauriConfig(newVersion);
+  updateRustManifest(newVersion);
+  verifyRepository();
 
   // Save the current commit as last processed
   saveLastProcessedCommit();
