@@ -145,15 +145,38 @@ test('denied notification permission is not bypassed by desktop fallback', () =>
   assert.equal(p.events.some((e) => e.event.kind === 'notify'), false);
 });
 
-test('reading an active thread only clears its local mapping', () => {
+test('focused chat alone does not falsely mark a notification as read', () => {
   const p = createPage();
   p.flush();
+  assert.equal(p.events.some((e) => e.event.kind === 'read'), false);
+});
+
+test('a recognized unread marker disappearing from the focused chat clears only its mapping', () => {
+  const p = createPage();
+  p.addThread('1', 'Unread message');
+  p.addThread('2', 'Unread message');
+  p.flush();
+  p.clear();
+  p.addThread('1', 'Seen');
+  p.addThread('2', 'Unread message');
+  p.refresh();
   assert.ok(p.events.some((e) => e.event.kind === 'read' && e.event.thread_id === '1'));
   p.document.hidden = true;
   p.location.pathname = '/t/2';
   p.handlers.get('document:visibilitychange')();
   p.flush();
   assert.equal(p.events.some((e) => e.event.kind === 'read' && e.event.thread_id === '2'), false);
+});
+
+test('unread markers disappearing while chat is hidden do not mark it read', () => {
+  const p = createPage();
+  p.addThread('1', 'Unread message');
+  p.flush();
+  p.document.hidden = true;
+  p.clear();
+  p.addThread('1', 'Seen');
+  p.refresh();
+  assert.equal(p.events.some((e) => e.event.kind === 'read'), false);
 });
 
 test('leaving Messenger resets native unread and notification state', () => {

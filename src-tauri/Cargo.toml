@@ -19,6 +19,7 @@ tauri-plugin-clipboard-manager = "2.5.0"
 tauri-plugin-opener = "2.7.2"
 url = "2"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-positioner = "2.4.0"

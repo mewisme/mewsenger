@@ -109,11 +109,13 @@
   let scheduled = false;
   let lastState = null;
   let lastRead = null;
+  let previousUnread = new Set();
   let knownMarker = false;
   let sentReset = false;
   const sync = () => {
     scheduled = false;
     const list = unreadThreads();
+    const currentUnread = new Set(list);
     const loadedChats = document.querySelectorAll('a[href*="/t/"]').length > 0;
     if (list.length > 0 || loadedChats) knownMarker = true;
     if (knownMarker) {
@@ -124,16 +126,23 @@
       }
     }
     const activeThread = threadFrom(location.href);
-    if (activeThread && !document.hidden && document.hasFocus()) {
-      if (activeThread !== lastRead) {
-        lastRead = activeThread;
-        send({ kind: 'read', thread_id: activeThread });
-      }
-    } else lastRead = null;
+    // Focusing a chat does not prove Messenger marked its messages read.
+    // Revoke routing only after a previously observed unread indicator has
+    // disappeared while its thread is active in a focused, loaded page.
+    const confirmedRead = loadedChats && activeThread &&
+      !document.hidden && document.hasFocus() &&
+      previousUnread.has(activeThread) && !currentUnread.has(activeThread);
+    if (confirmedRead && activeThread !== lastRead) {
+      lastRead = activeThread;
+      send({ kind: 'read', thread_id: activeThread });
+    }
+    if (!activeThread || currentUnread.has(activeThread)) lastRead = null;
+    previousUnread = currentUnread;
     if (!location.pathname.includes('/t/') && !document.querySelector('[role="navigation"],nav')) {
       if (!sentReset) {
         lastState = null;
         knownMarker = false;
+        previousUnread = new Set();
         send({ kind: 'reset' });
         sentReset = true;
       }

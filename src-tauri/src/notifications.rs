@@ -15,8 +15,50 @@ const MAX_TOASTS_PER_MINUTE: usize = 12;
 pub struct NotificationState {
     seen: HashMap<String, Instant>,
     rate: VecDeque<Instant>,
-    pending: HashMap<String, String>,
+    pending: HashMap<i32, PendingToast>,
+    next_toast_id: i32,
     unread: Option<usize>,
+}
+
+struct PendingToast {
+    thread: String,
+    created: Instant,
+}
+
+const TOAST_LIFETIME: Duration = Duration::from_secs(600);
+
+fn routable_thread(thread: &str) -> bool {
+    !thread.is_empty()
+        && thread.len() <= 160
+        && thread
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"_-:.".contains(&c))
+}
+
+fn thread_url(thread: &str) -> Option<Url> {
+    if !routable_thread(thread) {
+        return None;
+    }
+    let mut url = Url::parse("https://www.messenger.com/").ok()?;
+    url.path_segments_mut().ok()?.extend(["t", thread]);
+    Some(url)
+}
+
+fn clear_thread(state: &mut NotificationState, thread: &str) {
+    state.pending.retain(|_, toast| toast.thread != thread);
+}
+
+fn route_for_tap(state: &mut NotificationState, id: i32, now: Instant) -> Option<Url> {
+    let toast = state.pending.remove(&id)?;
+    (now.duration_since(toast.created) < TOAST_LIFETIME)
+        .then(|| thread_url(&toast.thread))
+        .flatten()
+}
+
+pub fn clicked_thread(app: &AppHandle, id: i32) -> Option<Url> {
+    let state = app.try_state::<Mutex<NotificationState>>()?;
+    let mut state = state.lock().ok()?;
+    route_for_tap(&mut state, id, Instant::now())
 }
 
 #[derive(Clone, Serialize)]
@@ -93,6 +135,9 @@ fn trim_history(state: &mut NotificationState, now: Instant) {
     {
         state.rate.pop_front();
     }
+    state
+        .pending
+        .retain(|_, toast| now.duration_since(toast.created) < TOAST_LIFETIME);
     if state.pending.len() > 128 {
         state.pending.clear();
     }
@@ -218,16 +263,33 @@ pub fn notification_event(
             if notifications.rate.len() >= MAX_TOASTS_PER_MINUTE {
                 return Ok(());
             }
+            let toast_id = notifications.next_toast_id.checked_add(1).unwrap_or(1);
             // Messenger can create its own browser toast. Only the JS fallback
             // reports notifications that require desktop delivery.
-            if let Err(error) = app.notification().builder().title(title).body(body).show() {
+            if let Err(error) = app
+                .notification()
+                .builder()
+                .id(toast_id)
+                .title(title)
+                .body(body)
+                .show()
+            {
                 eprintln!("could not show desktop notification: {error}");
                 return Err("native notification unavailable".into());
             }
+            notifications.next_toast_id = toast_id;
             notifications.seen.insert(id.clone(), now);
             notifications.rate.push_back(now);
             if let Some(thread) = thread_id {
-                notifications.pending.insert(thread, id);
+                if routable_thread(&thread) {
+                    notifications.pending.insert(
+                        toast_id,
+                        PendingToast {
+                            thread,
+                            created: now,
+                        },
+                    );
+                }
             }
         }
         MessageEvent::Unread { threads } => {
@@ -250,9 +312,9 @@ pub fn notification_event(
         }
         MessageEvent::Read { thread_id } => {
             safe_string(&thread_id, 160).ok_or("invalid conversation id")?;
-            // Notification history removal is not available in the desktop
-            // notification plugin. Forget the mapping; never clear other threads.
-            notifications.pending.remove(&thread_id);
+            // Windows cannot remove the delivered OS toast with this plugin.
+            // Stop routing only this thread's now-stale notifications.
+            clear_thread(&mut notifications, &thread_id);
         }
         MessageEvent::Reset => {
             reset_view_state(&mut notifications);
@@ -320,12 +382,105 @@ mod tests {
         let now = Instant::now();
         state.seen.insert("tag:one".into(), now);
         state.rate.push_back(now);
-        state.pending.insert("thread".into(), "tag:one".into());
+        state.pending.insert(
+            7,
+            PendingToast {
+                thread: "thread".into(),
+                created: now,
+            },
+        );
         state.unread = Some(2);
         reset_view_state(&mut state);
         assert_eq!(state.unread, None);
         assert!(state.pending.is_empty());
         assert_eq!(state.seen.len(), 1);
         assert_eq!(state.rate.len(), 1);
+    }
+
+    #[test]
+    fn click_routes_only_live_mapped_threads_and_consumes_the_match() {
+        let now = Instant::now();
+        let mut state = NotificationState::default();
+        state.pending.insert(
+            4,
+            PendingToast {
+                thread: "123".into(),
+                created: now,
+            },
+        );
+        state.pending.insert(
+            5,
+            PendingToast {
+                thread: "456".into(),
+                created: now,
+            },
+        );
+        assert_eq!(
+            route_for_tap(&mut state, 4, now).unwrap().as_str(),
+            "https://www.messenger.com/t/123"
+        );
+        assert!(route_for_tap(&mut state, 4, now).is_none());
+        assert_eq!(
+            route_for_tap(&mut state, 5, now).unwrap().as_str(),
+            "https://www.messenger.com/t/456"
+        );
+    }
+
+    #[test]
+    fn reading_one_thread_preserves_unrelated_click_targets() {
+        let now = Instant::now();
+        let mut state = NotificationState::default();
+        state.pending.insert(
+            1,
+            PendingToast {
+                thread: "one".into(),
+                created: now,
+            },
+        );
+        state.pending.insert(
+            2,
+            PendingToast {
+                thread: "one".into(),
+                created: now,
+            },
+        );
+        state.pending.insert(
+            3,
+            PendingToast {
+                thread: "two".into(),
+                created: now,
+            },
+        );
+        clear_thread(&mut state, "one");
+        assert!(route_for_tap(&mut state, 1, now).is_none());
+        assert!(route_for_tap(&mut state, 2, now).is_none());
+        assert!(route_for_tap(&mut state, 3, now).is_some());
+    }
+
+    #[test]
+    fn rejects_stale_and_unroutable_notification_data() {
+        let now = Instant::now();
+        let mut state = NotificationState::default();
+        state.pending.insert(
+            1,
+            PendingToast {
+                thread: "123".into(),
+                created: now - TOAST_LIFETIME,
+            },
+        );
+        state.pending.insert(
+            2,
+            PendingToast {
+                thread: "https://other.example/".into(),
+                created: now,
+            },
+        );
+        assert!(route_for_tap(&mut state, 1, now).is_none());
+        assert!(route_for_tap(&mut state, 2, now).is_none());
+        assert!(thread_url("hello/world").is_none());
+        assert_eq!(
+            thread_url("fbid:123_A").unwrap().host_str(),
+            Some("www.messenger.com")
+        );
     }
 }

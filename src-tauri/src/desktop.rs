@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::notifications;
 use tauri::{
     menu::MenuBuilder,
     tray::{TrayIconBuilder, TrayIconEvent},
@@ -13,6 +14,21 @@ static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
 fn activates_main_on_toast(action: &str) -> bool {
     action == "tap"
+}
+
+fn open_notification_thread(app: &AppHandle, notification_id: i32) {
+    let Some(url) = notifications::clicked_thread(app, notification_id) else {
+        return;
+    };
+    let Some(webview) = app.get_webview(REMOTE) else {
+        return;
+    };
+    // This is a URL built and validated on the Rust side, never executable
+    // text supplied by a notification or an external browser.
+    let Ok(target) = serde_json::to_string(url.as_str()) else {
+        return;
+    };
+    let _ = webview.eval(format!("window.location.assign({target});"));
 }
 
 fn show_main(app: &AppHandle) {
@@ -77,6 +93,9 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     if let Err(error) = app.notification().on_action(move |action| {
         if activates_main_on_toast(action.action_id()) {
             show_main(&notification_app);
+            if let Some(notification) = action.notification() {
+                open_notification_thread(&notification_app, notification.id());
+            }
         }
     }) {
         eprintln!("could not register notification actions: {error}");
