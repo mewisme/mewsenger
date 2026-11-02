@@ -119,6 +119,8 @@ pnpm run build
 
 Rust unit tests can be run with `cargo test --locked --lib` inside `src-tauri`. Vitest runs the desktop WebView simulation tests under Node and the local React UI component tests in jsdom. V8 coverage reports only imported local UI components; the desktop scripts use `node:vm` and are tested for behavior but cannot be measured by the Vitest V8 instrumentation. The local title and status bars run as separate children of the main native window.
 
+GitHub Actions verifies changes on Windows and macOS (Apple Silicon target) for pushes, pull requests, and manual runs. The workflow uses pinned pnpm and a frozen lockfile, runs JS/Rust tests, and builds without bundling or publishing. Creating a tag or release must be performed separately and deliberately; pushing to `main` no longer creates a draft release.
+
 ### Running in Development Mode
 
 The local shell development server runs on port 14871 with `strictPort` enabled, avoiding conflicts with other Tauri projects using port 1420; the separate Messenger WebView always loads `https://www.messenger.com` directly. Start the server through `pnpm tauri dev`, not by launching a debug executable against an unrelated server:
