@@ -2093,6 +2093,7 @@ dependencies = [
 name = "messenger"
 version = "0.1.1"
 dependencies = [
+ "serde",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",

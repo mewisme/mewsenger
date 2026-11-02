@@ -1,0 +1,15 @@
+{
+  "identifier": "messenger-notifications",
+  "description": "Allow the Messenger site to deliver bounded notification events",
+  "windows": ["main"],
+  "local": false,
+  "remote": {
+    "urls": [
+      "https://www.messenger.com/*",
+      "https://messenger.com/*"
+    ]
+  },
+  "permissions": [
+    "allow-notification-event"
+  ]
+}

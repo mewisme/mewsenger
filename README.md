@@ -21,7 +21,16 @@ Messenger is a native desktop application that wraps the Messenger web interface
 - **Window:** closing the main window hides it to the system tray when available. Double-click the tray icon, or select **Show Messenger**, to restore it. Select **Quit** to exit the process. If the tray is unavailable, closing the window exits normally.
 - **Navigation:** the tray menu provides Back, Forward, Reload and photo zoom controls. External links open in the default browser without Facebook fbclid tracking.
 
-Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, not on Facebook login pages or other origins. Native notifications and unread tracking will be implemented separately.
+Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, not on Facebook login pages or other origins.
+
+## Notifications and unread badges
+
+- Messenger's browser notifications remain the primary source. If WebView2 rejects a notification that Messenger already has permission to display, the app attempts to show it through the native OS notification service. It does not override a denied browser permission.
+- The fallback uses Messenger's supplied title and text. Group, sender and avatar details are only available when the website supplies them; no private Messenger API is queried.
+- Where the chat list contains explicit unread markers, the app counts distinct conversations and shows their count as a Windows taskbar overlay (or a system badge on supported platforms). It does not guess from the number shown in the page title.
+- Duplicate fallback notifications are suppressed for ten minutes when Messenger supplies a notification tag, or fifteen seconds when only text is available; at most twelve can be sent per minute. No message content or session tokens are persisted or logged.
+- The native notification plugin does not expose removal of individual Windows toast history entries or thread-specific click activation. The app removes local notification mappings when reading chats, but previously displayed Windows toasts may remain in the notification center. Clicking a native toast is not guaranteed to open its source conversation.
+- Delivery depends on Messenger's notification APIs and the app process being open. Notifications are not guaranteed after quitting the app or when Messenger sends them exclusively through a Service Worker that the page cannot observe.
 
 ## Prerequisites
 

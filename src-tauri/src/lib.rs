@@ -1,5 +1,6 @@
 mod desktop;
 mod links;
+mod notifications;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -12,6 +13,7 @@ use tauri_plugin_positioner::{Position, WindowExt};
 const MESSENGER_URL: &str = "https://www.messenger.com";
 const LINK_SCRIPT: &str = include_str!("links.js");
 const DESKTOP_SCRIPT: &str = include_str!("desktop.js");
+const NOTIFICATIONS_SCRIPT: &str = include_str!("notifications.js");
 
 fn open_popup<R: Runtime>(
     app: &AppHandle<R>,
@@ -32,6 +34,7 @@ fn open_popup<R: Runtime>(
         .window_features(features)
         .initialization_script(LINK_SCRIPT)
         .initialization_script(DESKTOP_SCRIPT)
+        .initialization_script(NOTIFICATIONS_SCRIPT)
         .on_navigation(move |url| links::allow_navigation(&navigation_app, url))
         .on_new_window(move |url, features| open_popup(&popup_app, url, features))
         .on_download(|_, _| true);
@@ -47,6 +50,10 @@ fn open_popup<R: Runtime>(
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(std::sync::Mutex::new(
+            notifications::NotificationState::default(),
+        ))
+        .invoke_handler(tauri::generate_handler![notifications::notification_event])
         .on_window_event(desktop::on_window_event)
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_notification::init())
@@ -62,6 +69,7 @@ pub fn run() {
                 .min_inner_size(800.0, 600.0)
                 .initialization_script(LINK_SCRIPT)
                 .initialization_script(DESKTOP_SCRIPT)
+                .initialization_script(NOTIFICATIONS_SCRIPT)
                 .on_navigation(move |url| links::allow_navigation(&navigation_app, url))
                 .on_new_window(move |url, features| open_popup(&popup_app, url, features))
                 .on_download(|_, _| true)
