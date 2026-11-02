@@ -198,6 +198,14 @@ test('only the scoped Messenger command is granted to remote content', () => {
     new URL('../tauri.conf.json', import.meta.url), 'utf8'));
   assert.deepEqual(desktop.webviews, ['status']);
   assert.deepEqual(desktop.permissions, []);
+  const titlebar = JSON.parse(fs.readFileSync(
+    new URL('../capabilities/titlebar.json', import.meta.url), 'utf8'));
+  assert.deepEqual(titlebar.webviews, ['titlebar']);
+  assert.equal(titlebar.windows, undefined);
+  assert.equal(titlebar.remote, undefined);
+  assert.ok(titlebar.permissions.includes('core:window:allow-start-dragging'));
+  assert.ok(titlebar.permissions.includes('core:window:allow-close'));
+  assert.equal(titlebar.permissions.includes('core:default'), false);
   assert.equal(config.app.withGlobalTauri, false);
-  assert.equal(config.build.devUrl, 'http://localhost:1420');
+  assert.equal(config.build.devUrl, 'http://localhost:14871');
 });

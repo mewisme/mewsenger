@@ -8,7 +8,7 @@ Messenger is a native desktop application that wraps the Messenger web interface
 
 ## Local desktop shell
 
-The main native window contains two independent WebViews. Messenger stays at `https://www.messenger.com` in its own full-height-minus-footer WebView, while the compact 36px footer loads bundled React and shadcn/ui assets from the app origin. Messenger is not embedded in an iframe, and no Messenger HTML is proxied through the local frontend. If the optional footer fails to initialize, the Messenger view retains the full window.
+The main native window contains three separate WebViews: a **custom 40px title bar at the top** with drag and Minimize / Maximize / Restore / Close controls, Messenger at `https://www.messenger.com` in the center, and a **36px status bar at the bottom**. The title bar and status bar load local React/shadcn components from separate app URLs. Messenger is not embedded in an iframe or proxied through the local frontend. Only the main window is frameless; call popups and Credits keep native window chrome. If the title bar fails, native decorations are restored; if the optional footer fails, Messenger uses the remaining space.
 
 The footer displays the installed application version, local network status and unread count from native state. Unverified values remain unknown until synchronized. **Credits** opens a separate native local window to avoid clipping inside the narrow footer. The app follows the system light/dark appearance.
 
@@ -16,7 +16,7 @@ The unread badge is updated only from recognized Messenger unread markers; missi
 
 Native fallback notification clicks can reveal the main window while a Windows toast is still on screen. The notification plugin cannot guarantee click activation from Windows Action Center, navigate to a specific conversation, or remove delivered Windows toast history. Opening a chat or clearing toast history is therefore not promised.
 
-Tauri's native multi-WebView support requires the Rust `unstable` feature on desktop. WebViews are mounted on a worker thread to avoid Windows WebView2 deadlocks. Only the `status` local WebView receives ordinary app APIs; the remote `messenger` WebView can invoke only the bounded notification command from approved Messenger HTTPS URLs. The local `credits` window can read the app version only.
+Tauri's native multi-WebView support requires the Rust `unstable` feature on desktop. WebViews are mounted on a worker thread to avoid Windows WebView2 deadlocks. The local `titlebar` WebView has narrowly scoped native window-control permissions; `status` has only the local status/credits APIs; the remote `messenger` WebView can invoke only the bounded notification command from approved Messenger HTTPS URLs. The local `credits` window can read the app version only.
 
 ## Features
 
@@ -30,7 +30,7 @@ Tauri's native multi-WebView support requires the Rust `unstable` feature on des
 - **Photo viewer:** Ctrl + mouse wheel (trackpad pinch in WebView2) to zoom, double-click a photo to toggle zoom, then scroll or drag the enlarged photo. Zoom resets when the viewer/photo changes.
 - **Chats:** Ctrl+K focuses Messenger search; Ctrl+Shift+N opens Messenger's new-message control if present; Ctrl+Alt+Up/Down moves between chats when not editing text. On macOS, use Command in place of Ctrl.
 - **Account:** use **Account menu** or **Sign out** from the native tray menu. These actions use Messenger's own controls and may be unavailable when Messenger changes its page layout.
-- **Window:** closing the main window hides it to the system tray when available. Double-click the tray icon, or select **Show Messenger**, to restore it. Select **Quit** to exit the process. If the tray is unavailable, closing the window exits normally.
+- **Window:** drag the custom top bar to move the main window, or double-click it to maximize/restore. The window buttons minimize, maximize/restore, and close. Closing the main window hides it to the system tray when available. Double-click the tray icon, or select **Show Messenger**, to restore it. Select **Quit** to exit the process. If the tray is unavailable, closing the window exits normally.
 - **Navigation:** the tray menu provides Back, Forward, Reload and photo zoom controls. External links open in the default browser without Facebook fbclid tracking.
 
 Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, not on Facebook login pages or other origins.
@@ -117,11 +117,11 @@ pnpm test:coverage
 pnpm run build
 ```
 
-Rust unit tests can be run with `cargo test --locked --lib` inside `src-tauri`. Vitest runs the desktop WebView simulation tests under Node and the local React UI component tests in jsdom. V8 coverage reports only imported local UI components; the desktop scripts use `node:vm` and are tested for behavior but cannot be measured by the Vitest V8 instrumentation. The local status-bar component is prepared for integration and is not yet displayed in the Messenger window.
+Rust unit tests can be run with `cargo test --locked --lib` inside `src-tauri`. Vitest runs the desktop WebView simulation tests under Node and the local React UI component tests in jsdom. V8 coverage reports only imported local UI components; the desktop scripts use `node:vm` and are tested for behavior but cannot be measured by the Vitest V8 instrumentation. The local title and status bars run as separate children of the main native window.
 
 ### Running in Development Mode
 
-The local shell development server runs on port 1420; the separate Messenger WebView always loads `https://www.messenger.com` directly:
+The local shell development server runs on port 14871 with `strictPort` enabled, avoiding conflicts with other Tauri projects using port 1420; the separate Messenger WebView always loads `https://www.messenger.com` directly. Start the server through `pnpm tauri dev`, not by launching a debug executable against an unrelated server:
 
 ```
 pnpm tauri dev

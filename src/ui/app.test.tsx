@@ -23,6 +23,17 @@ vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ label: runtime.view }),
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: runtime.listen }));
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    isMaximized: () => Promise.resolve(false),
+    onResized: () => Promise.resolve(() => {}),
+    minimize: () => Promise.resolve(),
+    maximize: () => Promise.resolve(),
+    unmaximize: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+    startDragging: () => Promise.resolve(),
+  }),
+}));
 
 beforeAll(() => {
   vi.stubGlobal("ResizeObserver", class {
@@ -87,6 +98,17 @@ test("native credits window shows factual metadata, not another status bar", asy
   expect(screen.getByText("Messenger desktop")).toBeTruthy();
   expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
   expect(runtime.listen).not.toHaveBeenCalled();
+});
+
+test("local title bar never renders the bottom status bar or requests native unread data", () => {
+  runtime.view = "titlebar";
+  render(<DesktopApp />);
+  expect(screen.getByRole("banner", { name: "Window title bar" })).toBeTruthy();
+  expect(screen.getByRole("navigation", { name: "Window controls" })).toBeTruthy();
+  expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
+  expect(runtime.invoke).not.toHaveBeenCalled();
+  expect(runtime.listen).not.toHaveBeenCalled();
+  expect(runtime.getVersion).not.toHaveBeenCalled();
 });
 
 test("displays only confirmed unread count and clears it on reset", async () => {

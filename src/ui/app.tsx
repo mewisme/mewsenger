@@ -5,27 +5,34 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBar } from "@/ui/status-bar";
+import { TitleBar } from "@/ui/title-bar";
+import { resolveLocalView } from "@/ui/local-view";
 
 export function DesktopApp() {
   const [version, setVersion] = useState("Version unavailable");
   const [creditsOpen, setCreditsOpen] = useState(false);
-  const creditsView = isTauri() && getCurrentWebview().label === "credits";
+  const localView = resolveLocalView(
+    typeof window !== "undefined" ? window.location.search : "",
+    isTauri() ? getCurrentWebview().label : null,
+  );
+  const creditsView = localView === "credits";
+  const titlebarView = localView === "titlebar";
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const [connection, setConnection] = useState<"offline" | "unknown">(
     () => typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "unknown",
   );
 
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isTauri() || titlebarView) return;
     let active = true;
     void getVersion()
       .then((value) => { if (active) setVersion(value); })
       .catch(() => { if (active) setVersion("Version unavailable"); });
     return () => { active = false; };
-  }, []);
+  }, [titlebarView]);
 
   useEffect(() => {
-    if (!isTauri() || creditsView) return;
+    if (!isTauri() || creditsView || titlebarView) return;
     let active = true;
     let eventReceived = false;
     let detach: (() => void) | undefined;
@@ -53,9 +60,10 @@ export function DesktopApp() {
       active = false;
       detach?.();
     };
-  }, [creditsView]);
+  }, [creditsView, titlebarView]);
 
   useEffect(() => {
+    if (titlebarView || creditsView) return;
     const offline = () => setConnection("offline");
     // A working network connection does not prove a Messenger session is connected.
     const online = () => setConnection("unknown");
@@ -65,7 +73,9 @@ export function DesktopApp() {
       window.removeEventListener("offline", offline);
       window.removeEventListener("online", online);
     };
-  }, []);
+  }, [titlebarView, creditsView]);
+
+  if (titlebarView) return <TitleBar />;
 
   if (creditsView) {
     return (

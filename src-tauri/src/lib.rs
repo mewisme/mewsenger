@@ -79,6 +79,7 @@ pub fn run() {
                 .title("Messenger")
                 .inner_size(800.0, 600.0)
                 .min_inner_size(800.0, 600.0)
+                .decorations(false)
                 .visible(false)
                 .build()?;
             window.move_window(Position::Center).unwrap();
@@ -92,6 +93,7 @@ pub fn run() {
             std::thread::spawn(move || {
                 if let Err(error) = shell::mount(&handle, &window) {
                     eprintln!("could not initialize Messenger views: {error}");
+                    let _ = window.set_decorations(true);
                     let _ = window.show();
                 }
             });
