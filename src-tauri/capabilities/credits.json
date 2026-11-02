@@ -2,5 +2,5 @@
   "identifier": "credits",
   "description": "Read the app version in the local credits window",
   "webviews": ["credits"],
-  "permissions": ["core:app:allow-version"]
+  "permissions": ["core:app:allow-version", "core:window:allow-close"]
 }

@@ -191,7 +191,9 @@ test('only the scoped Messenger command is granted to remote content', () => {
   assert.deepEqual(credits.webviews, ['credits']);
   assert.equal(credits.windows, undefined);
   assert.equal(credits.remote, undefined);
-  assert.deepEqual(credits.permissions, ['core:app:allow-version']);
+  assert.deepEqual(credits.permissions, [
+    'core:app:allow-version', 'core:window:allow-close',
+  ]);
   const desktop = JSON.parse(fs.readFileSync(
     new URL('../capabilities/desktop.json', import.meta.url), 'utf8'));
   const config = JSON.parse(fs.readFileSync(

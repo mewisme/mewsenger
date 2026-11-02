@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { StatusBar } from "@/ui/status-bar";
 import { TitleBar } from "@/ui/title-bar";
 import { resolveLocalView } from "@/ui/local-view";
+import { Credits } from "@/ui/credits";
 
 export function DesktopApp() {
   const [version, setVersion] = useState("Version unavailable");
@@ -78,16 +79,7 @@ export function DesktopApp() {
   if (titlebarView) return <TitleBar />;
 
   if (creditsView) {
-    return (
-      <main className="flex h-screen flex-col justify-center gap-3 overflow-auto bg-background px-6 py-5 text-foreground">
-        <h1 className="text-xl font-semibold">Messenger desktop</h1>
-        <p className="text-sm text-muted-foreground">
-          A desktop client built with Tauri, React, and shadcn/ui.
-        </p>
-        <p className="text-sm tabular-nums">{version}</p>
-        <p className="text-xs text-muted-foreground">Made by Mew</p>
-      </main>
-    );
+    return <Credits version={version} />;
   }
 
   function showCredits() {

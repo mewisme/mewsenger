@@ -61,6 +61,8 @@ test("renders separate top window controls with accessible names", async () => {
   render(<TitleBar />);
   expect(screen.getByRole("banner", { name: "Window title bar" })).toBeTruthy();
   expect(screen.getByText("Messenger")).toBeTruthy();
+  expect(screen.getByRole("banner", { name: "Window title bar" })
+    .querySelector("img")?.getAttribute("src")).toContain("32x32");
   expect(screen.getByRole("navigation", { name: "Window controls" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Minimize window" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Maximize window" })).toBeTruthy();

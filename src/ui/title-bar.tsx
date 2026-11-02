@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
-import { MessageCircle, Minus, Square, Copy, X } from "lucide-react";
+import { Minus, Square, Copy, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import appIcon from "../../src-tauri/icons/32x32.png";
 
 export function TitleBar() {
   const window = useMemo(() => isTauri() ? getCurrentWindow() : null, []);
@@ -48,7 +49,7 @@ export function TitleBar() {
         className="flex h-full min-w-0 flex-1 cursor-default items-center gap-2 px-3"
         onMouseDown={drag}
         onDoubleClick={toggleMaximize}>
-        <MessageCircle aria-hidden="true" className="size-4 shrink-0 text-blue-500" />
+        <img src={appIcon} alt="" aria-hidden="true" className="size-4 shrink-0" />
         <span className="truncate text-xs font-semibold">Messenger</span>
       </div>
       <nav aria-label="Window controls" className="flex h-full shrink-0 items-stretch">

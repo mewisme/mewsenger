@@ -94,8 +94,10 @@ test("opens credits details in the browser preview", async () => {
 test("native credits window shows factual metadata, not another status bar", async () => {
   runtime.view = "credits";
   render(<DesktopApp />);
-  expect(await screen.findByText("2.3.4")).toBeTruthy();
-  expect(screen.getByText("Messenger desktop")).toBeTruthy();
+  expect(await screen.findByText("Version 2.3.4")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Messenger" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: "Messenger icon" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
   expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
   expect(runtime.listen).not.toHaveBeenCalled();
 });

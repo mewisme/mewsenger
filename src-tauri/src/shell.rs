@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     webview::WebviewBuilder, AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl,
     Window,
@@ -10,6 +11,15 @@ pub const TITLEBAR: &str = "titlebar";
 pub const STATUS: &str = "status";
 const HEADER_HEIGHT: f64 = 40.0;
 const FOOTER_HEIGHT: f64 = 36.0;
+static CREDITS_OPENING: AtomicBool = AtomicBool::new(false);
+
+struct CreditsOpening;
+
+impl Drop for CreditsOpening {
+    fn drop(&mut self) {
+        CREDITS_OPENING.store(false, Ordering::Release);
+    }
+}
 
 pub(crate) fn local_asset_url(url: &Url) -> bool {
     match (url.scheme(), url.host_str()) {
@@ -129,20 +139,40 @@ pub fn show_credits(app: AppHandle, webview: tauri::Webview) -> Result<(), Strin
         let _ = window.set_focus();
         return Ok(());
     }
-    tauri::WebviewWindowBuilder::new(
-        &app,
-        "credits",
-        WebviewUrl::App("index.html?view=credits".into()),
-    )
-    .on_navigation(local_asset_url)
-    .title("About Messenger")
-    .inner_size(440.0, 240.0)
-    .min_inner_size(380.0, 220.0)
-    .resizable(false)
-    .center()
-    .build()
-    .map(|_| ())
-    .map_err(|error| format!("could not open credits: {error}"))
+    // WebView2 window creation from a synchronous IPC callback can block the
+    // native event loop. Construct this auxiliary window off the event thread.
+    if CREDITS_OPENING.swap(true, Ordering::AcqRel) {
+        return Ok(());
+    }
+    std::thread::spawn(move || {
+        let _opening = CreditsOpening;
+        if let Some(window) = app.get_webview_window("credits") {
+            let _ = window.show();
+            let _ = window.set_focus();
+            return;
+        }
+        match tauri::WebviewWindowBuilder::new(
+            &app,
+            "credits",
+            WebviewUrl::App("index.html?view=credits".into()),
+        )
+        .on_navigation(local_asset_url)
+        .title("About Messenger")
+        .inner_size(440.0, 260.0)
+        .min_inner_size(380.0, 240.0)
+        .resizable(false)
+        .visible(false)
+        .center()
+        .build()
+        {
+            Ok(window) => {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            Err(error) => eprintln!("could not open credits: {error}"),
+        }
+    });
+    Ok(())
 }
 
 #[cfg(test)]

@@ -60,6 +60,28 @@ function Invoke-Control([System.Windows.Automation.AutomationElement]$Root, [str
     Start-Sleep -Milliseconds 850
 }
 
+function Find-About([int]$ProcessId) {
+    $condition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::NameProperty, "About Messenger"
+    )
+    $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+        [System.Windows.Automation.TreeScope]::Children, $condition
+    )
+    foreach ($window in $windows) {
+        if ($window.Current.ProcessId -eq $ProcessId) { return $window }
+    }
+    return $null
+}
+
+function Wait-About([int]$ProcessId, [bool]$Present) {
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        $window = Find-About $ProcessId
+        if (($null -ne $window) -eq $Present) { return $window }
+        Start-Sleep -Milliseconds 300
+    }
+    throw "About window did not reach expected state: visible=$Present"
+}
+
 $owned = $null
 try {
     $owned = Start-Process -FilePath $Executable -PassThru
@@ -108,6 +130,21 @@ try {
     Write-Output "Native resize verified."
 
     if (-not $InspectOnly) {
+        Invoke-Control $root "Credits"
+        $about = Wait-About $owned.Id $true
+        $repository = Split-Path -Parent $PSScriptRoot
+        $version = (Get-Content (Join-Path $repository "package.json") -Raw | ConvertFrom-Json).version
+        $null = Require-Control $about $version
+        Invoke-Control $about "Close"
+        $null = Wait-About $owned.Id $false
+        Write-Output "About content, version and Close button verified."
+
+        Invoke-Control $root "Credits"
+        $reopened = Wait-About $owned.Id $true
+        $reopened.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
+        $null = Wait-About $owned.Id $false
+        Write-Output "About reopened and native close button verified."
+
         Invoke-Control $root "Maximize window"
         if (-not [MessengerWindow]::IsZoomed($hwnd)) { throw "Maximize did not complete." }
 

@@ -10,7 +10,7 @@ Messenger is a native desktop application that wraps the Messenger web interface
 
 The main native window contains three separate WebViews: a **custom 40px title bar at the top** with drag and Minimize / Maximize / Restore / Close controls, Messenger at `https://www.messenger.com` in the center, and a **36px status bar at the bottom**. The title bar and status bar load local React/shadcn components from separate app URLs. Messenger is not embedded in an iframe or proxied through the local frontend. Only the main window is frameless; call popups and Credits keep native window chrome. If the title bar fails, native decorations are restored; if the optional footer fails, Messenger uses the remaining space.
 
-The footer displays the installed application version, local network status and unread count from native state. Unverified values remain unknown until synchronized. **Credits** opens a separate native local window to avoid clipping inside the narrow footer. The app follows the system light/dark appearance.
+The footer displays the installed application version, local network status and unread count from native state. Unverified values remain unknown until synchronized. **Credits** opens a separate native local window to avoid clipping inside the narrow footer; it shows the bundled Messenger icon, actual version, and an explicit Close button. The custom title bar also uses the icon from `src-tauri/icons/`. The app follows the system light/dark appearance.
 
 The unread badge is updated only from recognized Messenger unread markers; missing markers remain unknown rather than being reported as zero. The footer displays **Offline** when the local browser reports no network and **Status unavailable** otherwise: an online network does not prove the Messenger session is connected. The disabled update control is a placeholder because no signed update provider is configured.
 
@@ -127,7 +127,7 @@ pnpm tauri build --debug --no-bundle
 pwsh -NoProfile -File ./scripts/verify-windows-shell.ps1
 ```
 
-The Windows check launches an isolated Messenger process, verifies the custom title controls and bottom status controls, resizes the window, then tests maximize, restore, minimize and close-to-tray. It terminates only the process it launched. For inspection without clicking the buttons, pass `-InspectOnly`. Logged-in chat, media calls, notifications and macOS behavior still require platform-specific interactive verification.
+The Windows check launches an isolated Messenger process, verifies the custom title controls and bottom status controls, resizes the window, opens About and tests both its in-app Close button and native X, then tests maximize, restore, minimize and close-to-tray. It terminates only the process it launched. For inspection without clicking the buttons, pass `-InspectOnly`. Logged-in chat, media calls, notifications and macOS behavior still require platform-specific interactive verification.
 
 To test unsigned Windows installers without uploading or publishing them, use `pnpm tauri build --debug`. MSI and NSIS packages are written under `src-tauri/target/debug/bundle/` and must not be treated as signed production releases.
 
