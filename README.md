@@ -114,12 +114,24 @@ The application configuration is located in `src-tauri/tauri.conf.json`. Key set
 pnpm test
 pnpm test:watch
 pnpm test:coverage
+pnpm version:check
 pnpm run build
 ```
 
 Rust unit tests can be run with `cargo test --locked --lib` inside `src-tauri`. Vitest runs the desktop WebView simulation tests under Node and the local React UI component tests in jsdom. V8 coverage reports only imported local UI components; the desktop scripts use `node:vm` and are tested for behavior but cannot be measured by the Vitest V8 instrumentation. The local title and status bars run as separate children of the main native window.
 
-GitHub Actions verifies changes on Windows and macOS (Apple Silicon target) for pushes, pull requests, and manual runs. The workflow uses pinned pnpm and a frozen lockfile, runs JS/Rust tests, and builds without bundling or publishing. Creating a tag or release must be performed separately and deliberately; pushing to `main` no longer creates a draft release.
+On Windows, build a debug executable and verify the real UI Automation controls in an interactive desktop:
+
+```powershell
+pnpm tauri build --debug --no-bundle
+pwsh -NoProfile -File ./scripts/verify-windows-shell.ps1
+```
+
+The Windows check launches an isolated Messenger process, verifies the custom title controls and bottom status controls, resizes the window, then tests maximize, restore, minimize and close-to-tray. It terminates only the process it launched. For inspection without clicking the buttons, pass `-InspectOnly`. Logged-in chat, media calls, notifications and macOS behavior still require platform-specific interactive verification.
+
+To test unsigned Windows installers without uploading or publishing them, use `pnpm tauri build --debug`. MSI and NSIS packages are written under `src-tauri/target/debug/bundle/` and must not be treated as signed production releases.
+
+GitHub Actions verifies changes on Windows Server 2025 and macOS 15 (Apple Silicon target) for pushes, pull requests, and manual runs. The workflow uses pinned pnpm and a frozen lockfile, runs JS/Rust tests, and builds without bundling or publishing. Creating a tag or release must be performed separately and deliberately; pushing to `main` no longer creates a draft release.
 
 ### Running in Development Mode
 
