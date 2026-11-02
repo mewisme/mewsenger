@@ -187,7 +187,7 @@ test('only the scoped Messenger command is granted to remote content', () => {
     new URL('../capabilities/credits.json', import.meta.url), 'utf8'));
   assert.deepEqual(local.webviews, ['status']);
   assert.equal(local.windows, undefined);
-  assert.deepEqual(local.permissions, ['core:default', 'allow-show-credits']);
+  assert.deepEqual(local.permissions, ['core:default', 'allow-show-credits', 'allow-current-status']);
   assert.deepEqual(credits.webviews, ['credits']);
   assert.equal(credits.windows, undefined);
   assert.equal(credits.remote, undefined);

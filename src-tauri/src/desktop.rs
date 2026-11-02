@@ -5,10 +5,15 @@ use tauri::{
     tray::{TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Manager, Window, WindowEvent,
 };
+use tauri_plugin_notification::NotificationExt;
 
 const MAIN: &str = "main";
 const REMOTE: &str = "messenger";
 static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
+
+fn activates_main_on_toast(action: &str) -> bool {
+    action == "tap"
+}
 
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_window(MAIN) {
@@ -66,6 +71,16 @@ fn dispatch(app: &AppHandle, id: &str) {
 }
 
 pub fn setup(app: &mut App) -> tauri::Result<()> {
+    // Windows only reports notification clicks while the toast is visible.
+    // Never infer a conversation ID or promise Action Center activation.
+    let notification_app = app.handle().clone();
+    if let Err(error) = app.notification().on_action(move |action| {
+        if activates_main_on_toast(action.action_id()) {
+            show_main(&notification_app);
+        }
+    }) {
+        eprintln!("could not register notification actions: {error}");
+    }
     let menu = MenuBuilder::new(app)
         .text("show", "Show Messenger")
         .text("search", "Search chats")
@@ -116,5 +131,18 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         }
         api.prevent_close();
         let _ = window.hide();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::activates_main_on_toast;
+
+    #[test]
+    fn toast_activation_only_handles_direct_taps() {
+        assert!(activates_main_on_toast("tap"));
+        assert!(!activates_main_on_toast("dismiss"));
+        assert!(!activates_main_on_toast("reply"));
+        assert!(!activates_main_on_toast(""));
     }
 }

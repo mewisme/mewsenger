@@ -5,6 +5,7 @@
   "webviews": ["status"],
   "permissions": [
     "core:default",
-    "allow-show-credits"
+    "allow-show-credits",
+    "allow-current-status"
   ]
 }

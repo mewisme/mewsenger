@@ -10,7 +10,11 @@ Messenger is a native desktop application that wraps the Messenger web interface
 
 The main native window contains two independent WebViews. Messenger stays at `https://www.messenger.com` in its own full-height-minus-footer WebView, while the compact 36px footer loads bundled React and shadcn/ui assets from the app origin. Messenger is not embedded in an iframe, and no Messenger HTML is proxied through the local frontend. If the optional footer fails to initialize, the Messenger view retains the full window.
 
-The footer displays the installed application version, a connection status and unread count only when confirmed by native state. The defaults are intentionally unknown until synchronized. **Credits** opens a separate native local window to avoid clipping inside the narrow footer. The app follows the system light/dark appearance.
+The footer displays the installed application version, local network status and unread count from native state. Unverified values remain unknown until synchronized. **Credits** opens a separate native local window to avoid clipping inside the narrow footer. The app follows the system light/dark appearance.
+
+The unread badge is updated only from recognized Messenger unread markers; missing markers remain unknown rather than being reported as zero. The footer displays **Offline** when the local browser reports no network and **Status unavailable** otherwise: an online network does not prove the Messenger session is connected. The disabled update control is a placeholder because no signed update provider is configured.
+
+Native fallback notification clicks can reveal the main window while a Windows toast is still on screen. The notification plugin cannot guarantee click activation from Windows Action Center, navigate to a specific conversation, or remove delivered Windows toast history. Opening a chat or clearing toast history is therefore not promised.
 
 Tauri's native multi-WebView support requires the Rust `unstable` feature on desktop. WebViews are mounted on a worker thread to avoid Windows WebView2 deadlocks. Only the `status` local WebView receives ordinary app APIs; the remote `messenger` WebView can invoke only the bounded notification command from approved Messenger HTTPS URLs. The local `credits` window can read the app version only.
 

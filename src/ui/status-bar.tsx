@@ -1,4 +1,4 @@
-import { CircleDot, Info } from "lucide-react";
+import { CircleDot, Info, RefreshCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -34,6 +34,14 @@ export function StatusBar({ version, connection, unreadCount, onCredits }: Statu
           <output aria-label="Unread conversations">
             <Badge variant="secondary">{unreadCount === null ? "–" : Math.max(0, unreadCount)}</Badge>
           </output>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" type="button" disabled aria-label="Updates unavailable">
+                <RefreshCcw aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Updates are not configured</TooltipContent>
+          </Tooltip>
           <Separator orientation="vertical" className="h-3" />
           <span aria-label="Application version" className="tabular-nums">{version}</span>
           <Tooltip>

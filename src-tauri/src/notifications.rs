@@ -4,8 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::Deserialize;
-use tauri::{AppHandle, Manager, State, Url, Webview};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, EventTarget, Manager, State, Url, Webview};
 use tauri_plugin_notification::NotificationExt;
 
 const HOSTS: &[&str] = &["messenger.com", "www.messenger.com"];
@@ -16,7 +16,37 @@ pub struct NotificationState {
     seen: HashMap<String, Instant>,
     rate: VecDeque<Instant>,
     pending: HashMap<String, String>,
-    unread: usize,
+    unread: Option<usize>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct DesktopStatus {
+    unread_count: Option<usize>,
+}
+
+fn publish_status(app: &AppHandle, unread_count: Option<usize>) {
+    // Do not send thread IDs, notification bodies, or account data to local UI.
+    let _ = app.emit_to(
+        EventTarget::webview("status"),
+        "desktop-status",
+        DesktopStatus { unread_count },
+    );
+}
+
+#[tauri::command]
+pub fn current_status(
+    webview: Webview,
+    state: State<'_, Mutex<NotificationState>>,
+) -> Result<DesktopStatus, String> {
+    if webview.label() != "status" || webview.window().label() != "main" {
+        return Err("local status view required".into());
+    }
+    let current = webview.url().map_err(|_| "local URL unavailable")?;
+    if !crate::shell::local_asset_url(&current) {
+        return Err("local origin required".into());
+    }
+    let unread_count = state.lock().map_err(|_| "status unavailable")?.unread;
+    Ok(DesktopStatus { unread_count })
 }
 
 #[derive(Deserialize)]
@@ -66,6 +96,13 @@ fn trim_history(state: &mut NotificationState, now: Instant) {
     if state.pending.len() > 128 {
         state.pending.clear();
     }
+}
+
+fn reset_view_state(state: &mut NotificationState) {
+    state.pending.clear();
+    state.unread = None;
+    // Keep deduplication and rate limits across navigation and page reloads.
+    // A remote page must not reset notification throttling.
 }
 
 fn unread_icon(count: usize) -> tauri::image::Image<'static> {
@@ -160,6 +197,7 @@ pub fn notification_event(
     let now = Instant::now();
     let mut notifications = state.lock().map_err(|_| "notification state unavailable")?;
     trim_history(&mut notifications, now);
+    let mut status_change = None;
     match event {
         MessageEvent::Notify {
             id,
@@ -204,9 +242,10 @@ pub fn notification_event(
                 .into_iter()
                 .collect::<std::collections::HashSet<_>>();
             let count = unique.len();
-            if notifications.unread != count {
-                notifications.unread = count;
+            if notifications.unread != Some(count) {
+                notifications.unread = Some(count);
                 badge(&app, count);
+                status_change = Some(Some(count));
             }
         }
         MessageEvent::Read { thread_id } => {
@@ -216,12 +255,14 @@ pub fn notification_event(
             notifications.pending.remove(&thread_id);
         }
         MessageEvent::Reset => {
-            notifications.pending.clear();
-            notifications.seen.clear();
-            notifications.rate.clear();
-            notifications.unread = 0;
+            reset_view_state(&mut notifications);
             badge(&app, 0);
+            status_change = Some(None);
         }
+    }
+    drop(notifications);
+    if let Some(count) = status_change {
+        publish_status(&app, count);
     }
     Ok(())
 }
@@ -265,5 +306,26 @@ mod tests {
         assert_eq!(icon.width(), 32);
         assert_eq!(icon.height(), 32);
         assert_eq!(icon.rgba().len(), 4096);
+    }
+
+    #[test]
+    fn unread_starts_unknown_not_zero() {
+        let state = NotificationState::default();
+        assert_eq!(state.unread, None);
+    }
+
+    #[test]
+    fn resetting_a_page_cannot_reset_toast_deduplication_or_rate_limits() {
+        let mut state = NotificationState::default();
+        let now = Instant::now();
+        state.seen.insert("tag:one".into(), now);
+        state.rate.push_back(now);
+        state.pending.insert("thread".into(), "tag:one".into());
+        state.unread = Some(2);
+        reset_view_state(&mut state);
+        assert_eq!(state.unread, None);
+        assert!(state.pending.is_empty());
+        assert_eq!(state.seen.len(), 1);
+        assert_eq!(state.rate.len(), 1);
     }
 }

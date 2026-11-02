@@ -22,6 +22,7 @@ test("renders factual version, unknown connectivity and unread count", () => {
   expect(screen.getByRole("status", { name: "Connection status" }).textContent).toBe("Status unavailable");
   expect(screen.getByLabelText("Application version").textContent).toBe("0.1.14");
   expect(screen.getByLabelText("Unread conversations").textContent).toBe("2");
+  expect((screen.getByRole("button", { name: "Updates unavailable" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 test("connection and unread counts update without claiming online by default", () => {

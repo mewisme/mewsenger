@@ -9,7 +9,7 @@ pub const REMOTE: &str = "messenger";
 pub const STATUS: &str = "status";
 const FOOTER_HEIGHT: f64 = 36.0;
 
-fn local_asset_url(url: &Url) -> bool {
+pub(crate) fn local_asset_url(url: &Url) -> bool {
     match (url.scheme(), url.host_str()) {
         ("tauri", Some("localhost")) => true,
         ("http" | "https", Some("tauri.localhost")) => true,

@@ -56,6 +56,7 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![
             notifications::notification_event,
+            notifications::current_status,
             shell::show_credits
         ])
         .on_window_event(|window, event| {
