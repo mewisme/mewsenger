@@ -1,10 +1,9 @@
-const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
-const path = require('node:path');
-const test = require('node:test');
-const vm = require('node:vm');
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { test } from 'vitest';
+import vm from 'node:vm';
 
-const script = readFileSync(path.join(__dirname, 'links.js'), 'utf8');
+const script = readFileSync(new URL('./links.js', import.meta.url), 'utf8');
 
 function click(href, {
   button = 0, download = false, ctrlKey = false, metaKey = false,

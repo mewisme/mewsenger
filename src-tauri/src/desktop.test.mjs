@@ -1,10 +1,9 @@
-const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
-const path = require('node:path');
-const test = require('node:test');
-const vm = require('node:vm');
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { test } from 'vitest';
+import vm from 'node:vm';
 
-const script = readFileSync(path.join(__dirname, 'desktop.js'), 'utf8');
+const script = readFileSync(new URL('./desktop.js', import.meta.url), 'utf8');
 
 function page(url = 'https://www.messenger.com/t/123') {
   const handlers = new Map();

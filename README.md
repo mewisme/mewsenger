@@ -34,8 +34,8 @@ Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, n
 
 ## Prerequisites
 
-- Node.js (LTS version)
-- pnpm (package manager)
+- Node.js 24 or newer
+- pnpm 12.16.1 (pinned in package.json)
 - Rust (stable toolchain)
 - Platform-specific build tools:
   - Windows: Microsoft Visual Studio C++ Build Tools
@@ -95,6 +95,17 @@ The application configuration is located in `src-tauri/tauri.conf.json`. Key set
 - Security policies
 
 ## Development
+
+### Testing
+
+```shell
+pnpm test
+pnpm test:watch
+pnpm test:coverage
+pnpm run build
+```
+
+Rust unit tests can be run with `cargo test --locked --lib` inside `src-tauri`. Vitest runs the desktop WebView simulation tests under Node and the local React UI component tests in jsdom. V8 coverage reports only imported local UI components; the desktop scripts use `node:vm` and are tested for behavior but cannot be measured by the Vitest V8 instrumentation. The local status-bar component is prepared for integration and is not yet displayed in the Messenger window.
 
 ### Running in Development Mode
 

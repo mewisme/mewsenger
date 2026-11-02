@@ -1,10 +1,9 @@
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const test = require('node:test');
-const vm = require('node:vm');
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { test } from 'vitest';
+import vm from 'node:vm';
 
-const script = fs.readFileSync(path.join(__dirname, 'notifications.js'), 'utf8');
+const script = fs.readFileSync(new URL('./notifications.js', import.meta.url), 'utf8');
 
 function createPage({
   url = 'https://www.messenger.com/t/1',
@@ -174,7 +173,7 @@ test('no desktop command exposure means app keeps the Messenger page functioning
 
 test('only the scoped Messenger command is granted to remote content', () => {
   const settings = JSON.parse(fs.readFileSync(
-    path.join(__dirname, '..', 'capabilities', 'messenger-notifications.json'), 'utf8'));
+    new URL('../capabilities/messenger-notifications.json', import.meta.url), 'utf8'));
   assert.equal(settings.local, false);
   assert.deepEqual(settings.windows, ['main']);
   assert.deepEqual(settings.permissions, ['allow-notification-event']);
