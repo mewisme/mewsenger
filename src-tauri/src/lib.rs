@@ -1,3 +1,4 @@
+mod desktop;
 mod links;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,6 +11,7 @@ use tauri_plugin_positioner::{Position, WindowExt};
 
 const MESSENGER_URL: &str = "https://www.messenger.com";
 const LINK_SCRIPT: &str = include_str!("links.js");
+const DESKTOP_SCRIPT: &str = include_str!("desktop.js");
 
 fn open_popup<R: Runtime>(
     app: &AppHandle<R>,
@@ -29,6 +31,7 @@ fn open_popup<R: Runtime>(
         .title("Messenger")
         .window_features(features)
         .initialization_script(LINK_SCRIPT)
+        .initialization_script(DESKTOP_SCRIPT)
         .on_navigation(move |url| links::allow_navigation(&navigation_app, url))
         .on_new_window(move |url, features| open_popup(&popup_app, url, features))
         .on_download(|_, _| true);
@@ -44,6 +47,7 @@ fn open_popup<R: Runtime>(
 
 pub fn run() {
     tauri::Builder::default()
+        .on_window_event(desktop::on_window_event)
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -57,11 +61,16 @@ pub fn run() {
                 .inner_size(800.0, 600.0)
                 .min_inner_size(800.0, 600.0)
                 .initialization_script(LINK_SCRIPT)
+                .initialization_script(DESKTOP_SCRIPT)
                 .on_navigation(move |url| links::allow_navigation(&navigation_app, url))
                 .on_new_window(move |url, features| open_popup(&popup_app, url, features))
                 .on_download(|_, _| true)
                 .build()?;
             window.move_window(Position::Center).unwrap();
+            // A missing system tray must never prevent Messenger from starting.
+            if let Err(error) = desktop::setup(app) {
+                eprintln!("could not initialize desktop menu/tray: {error}");
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

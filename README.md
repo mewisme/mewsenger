@@ -13,6 +13,16 @@ Messenger is a native desktop application that wraps the Messenger web interface
 - Clipboard manager integration
 - Window positioning and management
 
+## Desktop controls
+
+- **Photo viewer:** Ctrl + mouse wheel (trackpad pinch in WebView2) to zoom, double-click a photo to toggle zoom, then scroll or drag the enlarged photo. Zoom resets when the viewer/photo changes.
+- **Chats:** Ctrl+K focuses Messenger search; Ctrl+Shift+N opens Messenger's new-message control if present; Ctrl+Alt+Up/Down moves between chats when not editing text. On macOS, use Command in place of Ctrl.
+- **Account:** use **Account menu** or **Sign out** from the native tray menu. These actions use Messenger's own controls and may be unavailable when Messenger changes its page layout.
+- **Window:** closing the main window hides it to the system tray when available. Double-click the tray icon, or select **Show Messenger**, to restore it. Select **Quit** to exit the process. If the tray is unavailable, closing the window exits normally.
+- **Navigation:** the tray menu provides Back, Forward, Reload and photo zoom controls. External links open in the default browser without Facebook fbclid tracking.
+
+Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, not on Facebook login pages or other origins. Native notifications and unread tracking will be implemented separately.
+
 ## Prerequisites
 
 - Node.js (LTS version)
