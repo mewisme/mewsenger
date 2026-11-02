@@ -1,12 +1,13 @@
 mod desktop;
 mod links;
 mod notifications;
+mod shell;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tauri::{
     webview::{NewWindowFeatures, NewWindowResponse},
-    AppHandle, Runtime, Url, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Runtime, Url, WebviewUrl, WebviewWindowBuilder, WindowBuilder, WindowEvent,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
@@ -53,32 +54,46 @@ pub fn run() {
         .manage(std::sync::Mutex::new(
             notifications::NotificationState::default(),
         ))
-        .invoke_handler(tauri::generate_handler![notifications::notification_event])
-        .on_window_event(desktop::on_window_event)
+        .invoke_handler(tauri::generate_handler![
+            notifications::notification_event,
+            shell::show_credits
+        ])
+        .on_window_event(|window, event| {
+            desktop::on_window_event(window, event);
+            if matches!(
+                event,
+                WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
+            ) {
+                if let Err(error) = shell::resize(window) {
+                    eprintln!("could not resize Messenger views: {error}");
+                }
+            }
+        })
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let url = Url::parse(MESSENGER_URL).expect("valid initial URL");
-            let navigation_app = app.handle().clone();
-            let popup_app = app.handle().clone();
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+            let window = WindowBuilder::new(app, "main")
                 .title("Messenger")
                 .inner_size(800.0, 600.0)
                 .min_inner_size(800.0, 600.0)
-                .initialization_script(LINK_SCRIPT)
-                .initialization_script(DESKTOP_SCRIPT)
-                .initialization_script(NOTIFICATIONS_SCRIPT)
-                .on_navigation(move |url| links::allow_navigation(&navigation_app, url))
-                .on_new_window(move |url, features| open_popup(&popup_app, url, features))
-                .on_download(|_, _| true)
+                .visible(false)
                 .build()?;
             window.move_window(Position::Center).unwrap();
             // A missing system tray must never prevent Messenger from starting.
             if let Err(error) = desktop::setup(app) {
                 eprintln!("could not initialize desktop menu/tray: {error}");
             }
+            // WebView2 child creation can deadlock from Tauri's synchronous setup
+            // and event callbacks. Mount from a worker after the event loop starts.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Err(error) = shell::mount(&handle, &window) {
+                    eprintln!("could not initialize Messenger views: {error}");
+                    let _ = window.show();
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

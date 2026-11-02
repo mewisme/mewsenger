@@ -5,7 +5,7 @@ use std::{
 };
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State, Url, WebviewWindow};
+use tauri::{AppHandle, Manager, State, Url, Webview};
 use tauri_plugin_notification::NotificationExt;
 
 const HOSTS: &[&str] = &["messenger.com", "www.messenger.com"];
@@ -38,7 +38,7 @@ pub enum MessageEvent {
 }
 
 fn trusted(url: &Url, label: &str) -> bool {
-    label == "main"
+    label == "messenger"
         && url.scheme() == "https"
         && url.port().is_none()
         && url.host_str().is_some_and(|host| HOSTS.contains(&host))
@@ -126,7 +126,7 @@ fn unread_icon(count: usize) -> tauri::image::Image<'static> {
 }
 
 fn badge(app: &AppHandle, count: usize) {
-    let Some(window) = app.get_webview_window("main") else {
+    let Some(window) = app.get_window("main") else {
         return;
     };
     #[cfg(target_os = "windows")]
@@ -149,12 +149,12 @@ fn badge(app: &AppHandle, count: usize) {
 #[tauri::command]
 pub fn notification_event(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, Mutex<NotificationState>>,
     event: MessageEvent,
 ) -> Result<(), String> {
-    let current = window.url().map_err(|_| "origin unavailable")?;
-    if !trusted(&current, window.label()) {
+    let current = webview.url().map_err(|_| "origin unavailable")?;
+    if webview.window().label() != "main" || !trusted(&current, webview.label()) {
         return Err("origin not permitted".into());
     }
     let now = Instant::now();
@@ -233,15 +233,15 @@ mod tests {
     fn only_messenger_https_in_the_main_window_is_trusted() {
         assert!(trusted(
             &Url::parse("https://www.messenger.com/t/12").unwrap(),
-            "main"
+            "messenger"
         ));
         assert!(!trusted(
             &Url::parse("http://www.messenger.com/").unwrap(),
-            "main"
+            "messenger"
         ));
         assert!(!trusted(
             &Url::parse("https://www.messenger.com.evil.org/").unwrap(),
-            "main"
+            "messenger"
         ));
         assert!(!trusted(
             &Url::parse("https://www.messenger.com/").unwrap(),
@@ -249,7 +249,7 @@ mod tests {
         ));
         assert!(!trusted(
             &Url::parse("https://www.messenger.com:444/").unwrap(),
-            "main"
+            "messenger"
         ));
     }
     #[test]

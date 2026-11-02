@@ -1,7 +1,7 @@
 {
   "identifier": "messenger-notifications",
   "description": "Allow the Messenger site to deliver bounded notification events",
-  "windows": ["main"],
+  "webviews": ["messenger"],
   "local": false,
   "remote": {
     "urls": [

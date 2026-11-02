@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm run dev",
     "beforeBuildCommand": "pnpm run build",
-    "devUrl": "https://www.messenger.com",
+    "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
   "app": {

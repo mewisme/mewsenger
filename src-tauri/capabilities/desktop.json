@@ -5,8 +5,8 @@
     "windows",
     "linux"
   ],
-  "windows": [
-    "main"
+  "webviews": [
+    "status"
   ],
   "permissions": []
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-show-credits"
+description = "Enables the show_credits command without any pre-configured scope."
+commands.allow = ["show_credits"]
+
+[[permission]]
+identifier = "deny-show-credits"
+description = "Denies the show_credits command without any pre-configured scope."
+commands.deny = ["show_credits"]

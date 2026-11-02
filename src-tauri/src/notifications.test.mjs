@@ -175,9 +175,29 @@ test('only the scoped Messenger command is granted to remote content', () => {
   const settings = JSON.parse(fs.readFileSync(
     new URL('../capabilities/messenger-notifications.json', import.meta.url), 'utf8'));
   assert.equal(settings.local, false);
-  assert.deepEqual(settings.windows, ['main']);
+  assert.deepEqual(settings.webviews, ['messenger']);
+  assert.equal(settings.windows, undefined);
   assert.deepEqual(settings.permissions, ['allow-notification-event']);
   assert.deepEqual(settings.remote.urls, [
     'https://www.messenger.com/*', 'https://messenger.com/*',
   ]);
+  const local = JSON.parse(fs.readFileSync(
+    new URL('../capabilities/default.json', import.meta.url), 'utf8'));
+  const credits = JSON.parse(fs.readFileSync(
+    new URL('../capabilities/credits.json', import.meta.url), 'utf8'));
+  assert.deepEqual(local.webviews, ['status']);
+  assert.equal(local.windows, undefined);
+  assert.deepEqual(local.permissions, ['core:default', 'allow-show-credits']);
+  assert.deepEqual(credits.webviews, ['credits']);
+  assert.equal(credits.windows, undefined);
+  assert.equal(credits.remote, undefined);
+  assert.deepEqual(credits.permissions, ['core:app:allow-version']);
+  const desktop = JSON.parse(fs.readFileSync(
+    new URL('../capabilities/desktop.json', import.meta.url), 'utf8'));
+  const config = JSON.parse(fs.readFileSync(
+    new URL('../tauri.conf.json', import.meta.url), 'utf8'));
+  assert.deepEqual(desktop.webviews, ['status']);
+  assert.deepEqual(desktop.permissions, []);
+  assert.equal(config.app.withGlobalTauri, false);
+  assert.equal(config.build.devUrl, 'http://localhost:1420');
 });

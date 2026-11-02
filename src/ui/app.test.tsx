@@ -7,10 +7,18 @@ import { DesktopApp } from "./app";
 const runtime = vi.hoisted(() => ({
   available: true,
   getVersion: vi.fn(),
+  invoke: vi.fn(),
+  view: "status",
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => runtime.available }));
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => runtime.available,
+  invoke: runtime.invoke,
+}));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: runtime.getVersion }));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ label: runtime.view }),
+}));
 
 beforeAll(() => {
   vi.stubGlobal("ResizeObserver", class {
@@ -23,6 +31,8 @@ afterAll(() => vi.unstubAllGlobals());
 afterEach(cleanup);
 beforeEach(() => {
   runtime.available = true;
+  runtime.view = "status";
+  runtime.invoke.mockReset().mockResolvedValue(undefined);
   runtime.getVersion.mockReset().mockResolvedValue("2.3.4");
 });
 
@@ -41,10 +51,27 @@ test("does not invent version data outside the Tauri runtime", () => {
   expect(runtime.getVersion).not.toHaveBeenCalled();
 });
 
-test("opens credits details via the status bar", async () => {
+test("opens the local native credits window without a clipped footer dialog", async () => {
+  const user = userEvent.setup();
+  render(<DesktopApp />);
+  await user.click(screen.getByRole("button", { name: "Credits" }));
+  expect(runtime.invoke).toHaveBeenCalledWith("show_credits");
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("opens credits details in the browser preview", async () => {
+  runtime.available = false;
   const user = userEvent.setup();
   render(<DesktopApp />);
   await user.click(screen.getByRole("button", { name: "Credits" }));
   expect((await screen.findByRole("dialog")).textContent).toContain("Messenger desktop");
   expect(screen.getByText("Made by Mew")).toBeTruthy();
+});
+
+test("native credits window shows factual metadata, not another status bar", async () => {
+  runtime.view = "credits";
+  render(<DesktopApp />);
+  expect(await screen.findByText("2.3.4")).toBeTruthy();
+  expect(screen.getByText("Messenger desktop")).toBeTruthy();
+  expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
 });

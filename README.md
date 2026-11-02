@@ -6,6 +6,14 @@ A desktop application wrapper for Facebook Messenger built with Tauri.
 
 Messenger is a native desktop application that wraps the Messenger web interface (messenger.com) in a standalone window. It provides a desktop experience for Facebook Messenger with native features like notifications and clipboard management.
 
+## Local desktop shell
+
+The main native window contains two independent WebViews. Messenger stays at `https://www.messenger.com` in its own full-height-minus-footer WebView, while the compact 36px footer loads bundled React and shadcn/ui assets from the app origin. Messenger is not embedded in an iframe, and no Messenger HTML is proxied through the local frontend. If the optional footer fails to initialize, the Messenger view retains the full window.
+
+The footer displays the installed application version, a connection status and unread count only when confirmed by native state. The defaults are intentionally unknown until synchronized. **Credits** opens a separate native local window to avoid clipping inside the narrow footer. The app follows the system light/dark appearance.
+
+Tauri's native multi-WebView support requires the Rust `unstable` feature on desktop. WebViews are mounted on a worker thread to avoid Windows WebView2 deadlocks. Only the `status` local WebView receives ordinary app APIs; the remote `messenger` WebView can invoke only the bounded notification command from approved Messenger HTTPS URLs. The local `credits` window can read the app version only.
+
 ## Features
 
 - Native desktop application for Windows, macOS, and Linux
@@ -75,7 +83,7 @@ The built application will be in `src-tauri/target/release/` (or `src-tauri/targ
 ```
 messenger/
 ├── src/                    # Frontend source files
-│   └── main.ts            # Main TypeScript entry point
+│   └── main.tsx            # Main TypeScript entry point
 ├── src-tauri/             # Tauri backend (Rust)
 │   ├── src/
 │   │   ├── main.rs        # Application entry point
@@ -109,7 +117,7 @@ Rust unit tests can be run with `cargo test --locked --lib` inside `src-tauri`. 
 
 ### Running in Development Mode
 
-The development server runs on port 1420 and loads messenger.com directly:
+The local shell development server runs on port 1420; the separate Messenger WebView always loads `https://www.messenger.com` directly:
 
 ```
 pnpm tauri dev

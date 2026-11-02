@@ -7,10 +7,11 @@ use tauri::{
 };
 
 const MAIN: &str = "main";
+const REMOTE: &str = "messenger";
 static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
 fn show_main(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(MAIN) {
+    if let Some(window) = app.get_window(MAIN) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -22,14 +23,14 @@ fn dispatch(app: &AppHandle, id: &str) {
         "quit" => app.exit(0),
         "show" => show_main(app),
         "hide" => {
-            if let Some(window) = app.get_webview_window(MAIN) {
+            if let Some(window) = app.get_window(MAIN) {
                 let _ = window.hide();
             }
         }
         "search" | "new-chat" | "account" | "logout" | "next-chat" | "prev-chat" | "zoom-in"
         | "zoom-out" | "zoom-reset" => {
             show_main(app);
-            if let Some(window) = app.get_webview_window(MAIN) {
+            if let Some(window) = app.get_webview(REMOTE) {
                 let script = match id {
                     "search" => r#"window.__mewDesktopAction?.("search")"#,
                     "new-chat" => r#"window.__mewDesktopAction?.("new-chat")"#,
@@ -46,13 +47,13 @@ fn dispatch(app: &AppHandle, id: &str) {
         }
         "reload" => {
             show_main(app);
-            if let Some(window) = app.get_webview_window(MAIN) {
+            if let Some(window) = app.get_webview(REMOTE) {
                 let _ = window.eval("location.reload()");
             }
         }
         "back" | "forward" => {
             show_main(app);
-            if let Some(window) = app.get_webview_window(MAIN) {
+            if let Some(window) = app.get_webview(REMOTE) {
                 let _ = window.eval(if id == "back" {
                     "history.back()"
                 } else {
