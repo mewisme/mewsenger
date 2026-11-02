@@ -4,9 +4,6 @@
   "description": "Capability for the main window",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "notification:default",
-    "clipboard-manager:default",
-    "opener:allow-default-urls"
+    "core:default"
   ]
 }
