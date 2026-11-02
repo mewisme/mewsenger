@@ -16,6 +16,14 @@ fn activates_main_on_toast(action: &str) -> bool {
     action == "tap"
 }
 
+fn is_messenger_fallback(notification: &tauri_plugin_notification::ActiveNotification) -> bool {
+    notification
+        .extra()
+        .get("messenger_fallback")
+        .and_then(|value| value.as_bool())
+        == Some(true)
+}
+
 fn open_notification_thread(app: &AppHandle, notification_id: i32) {
     let Some(url) = notifications::clicked_thread(app, notification_id) else {
         return;
@@ -23,6 +31,13 @@ fn open_notification_thread(app: &AppHandle, notification_id: i32) {
     let Some(webview) = app.get_webview(REMOTE) else {
         return;
     };
+    // A toast must not interrupt Messenger login or an external redirect.
+    if !webview
+        .url()
+        .is_ok_and(|url| notifications::trusted(&url, webview.label()))
+    {
+        return;
+    }
     // This is a URL built and validated on the Rust side, never executable
     // text supplied by a notification or an external browser.
     let Ok(target) = serde_json::to_string(url.as_str()) else {
@@ -94,7 +109,9 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
         if activates_main_on_toast(action.action_id()) {
             show_main(&notification_app);
             if let Some(notification) = action.notification() {
-                open_notification_thread(&notification_app, notification.id());
+                if is_messenger_fallback(notification) {
+                    open_notification_thread(&notification_app, notification.id());
+                }
             }
         }
     }) {
@@ -155,7 +172,7 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
 
 #[cfg(test)]
 mod tests {
-    use super::activates_main_on_toast;
+    use super::{activates_main_on_toast, is_messenger_fallback};
 
     #[test]
     fn toast_activation_only_handles_direct_taps() {
@@ -163,5 +180,27 @@ mod tests {
         assert!(!activates_main_on_toast("dismiss"));
         assert!(!activates_main_on_toast("reply"));
         assert!(!activates_main_on_toast(""));
+    }
+
+    #[test]
+    fn only_app_generated_fallback_toasts_can_route_a_chat() {
+        let ours: tauri_plugin_notification::ActiveNotification =
+            serde_json::from_value(serde_json::json!({
+                "id": 17, "extra": { "messenger_fallback": true }
+            }))
+            .unwrap();
+        let other: tauri_plugin_notification::ActiveNotification =
+            serde_json::from_value(serde_json::json!({
+                "id": 17, "extra": { "messenger_fallback": false }
+            }))
+            .unwrap();
+        let missing: tauri_plugin_notification::ActiveNotification =
+            serde_json::from_value(serde_json::json!({
+                "id": 17
+            }))
+            .unwrap();
+        assert!(is_messenger_fallback(&ours));
+        assert!(!is_messenger_fallback(&other));
+        assert!(!is_messenger_fallback(&missing));
     }
 }

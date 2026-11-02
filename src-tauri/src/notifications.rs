@@ -109,7 +109,7 @@ pub enum MessageEvent {
     Reset,
 }
 
-fn trusted(url: &Url, label: &str) -> bool {
+pub(crate) fn trusted(url: &Url, label: &str) -> bool {
     label == "messenger"
         && url.scheme() == "https"
         && url.port().is_none()
@@ -270,6 +270,7 @@ pub fn notification_event(
                 .notification()
                 .builder()
                 .id(toast_id)
+                .extra("messenger_fallback", true)
                 .title(title)
                 .body(body)
                 .show()
