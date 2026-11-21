@@ -1,7 +1,7 @@
 // Enhance only the live Messenger page. No Tauri IPC is exposed to it.
 (() => {
   if (location.protocol !== 'https:' ||
-      !['messenger.com', 'www.messenger.com'].includes(location.hostname) ||
+      !window.__MEW_SITE__?.app_hosts?.includes(location.hostname) ||
       window !== window.top || window.__mewDesktopInstalled) return;
   window.__mewDesktopInstalled = true;
 

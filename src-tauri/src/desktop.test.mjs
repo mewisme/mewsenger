@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'vitest';
 import vm from 'node:vm';
+import { site, facebookSite } from './site-fixture.mjs';
 
 const script = readFileSync(new URL('./desktop.js', import.meta.url), 'utf8');
 
-function page(url = 'https://www.messenger.com/t/123') {
+function page(url = 'https://www.messenger.com/t/123', siteProfile = site) {
   const handlers = new Map();
   const timers = [];
   const state = { field: null, image: null, dialog: null, search: null, chats: [], account: null, logout: null, newChat: null };
@@ -52,6 +53,7 @@ function page(url = 'https://www.messenger.com/t/123') {
     addEventListener(name, fn) { handlers.set('window:' + name, fn); },
   };
   window.top = window;
+  if (siteProfile) window.__MEW_SITE__ = siteProfile;
   const location = new URL(url);
   vm.runInNewContext(script, {
     window, location, document, MutationObserver: class {
@@ -82,6 +84,17 @@ function page(url = 'https://www.messenger.com/t/123') {
   };
   return { state, window, document, location, Element, handlers, flush, fire };
 }
+
+test('desktop enhancement follows the configured site profile', () => {
+  const messengerOnFacebookProfile = page('https://www.messenger.com/t/123', facebookSite);
+  assert.equal(messengerOnFacebookProfile.window.__mewDesktopInstalled, undefined);
+  assert.equal(messengerOnFacebookProfile.handlers.size, 0);
+  const facebook = page('https://www.facebook.com/messages/t/1', facebookSite);
+  assert.equal(facebook.window.__mewDesktopInstalled, true);
+  const inert = page('https://www.messenger.com/t/123', null);
+  assert.equal(inert.window.__mewDesktopInstalled, undefined);
+  assert.equal(inert.handlers.size, 0);
+});
 
 test('desktop enhancement never runs on third-party pages or non-HTTPS', () => {
   for (const url of ['https://www.facebook.com/messages', 'https://messenger.com.evil.example/', 'http://www.messenger.com/']) {

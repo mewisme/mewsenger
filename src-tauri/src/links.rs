@@ -1,31 +1,8 @@
 use tauri::{AppHandle, Runtime, Url};
 use tauri_plugin_opener::OpenerExt;
 
-const LINK_SHIM_HOSTS: &[&str] = &["l.messenger.com", "l.facebook.com", "lm.facebook.com"];
-const FACEBOOK_POPUP_PATHS: &[&str] = &[
-    "/messages",
-    "/messenger_media",
-    "/groupcall",
-    "/videocall",
-    "/login",
-    "/checkpoint",
-    "/dialog",
-    "/connect",
-];
-
-fn matches_path(path: &str, prefix: &str) -> bool {
-    path == prefix || path.starts_with(&format!("{prefix}/"))
-}
-
-fn on_host(url: &Url, domain: &str) -> bool {
-    url.host_str()
-        .is_some_and(|host| host == domain || host.ends_with(&format!(".{domain}")))
-}
-
 fn is_link_shim(url: &Url) -> bool {
-    url.host_str()
-        .is_some_and(|host| LINK_SHIM_HOSTS.contains(&host))
-        && url.path() == "/l.php"
+    crate::site::current().is_link_shim(url)
 }
 
 /// Popups for Messenger and its calls remain in the app. Other links go to the browser.
@@ -33,14 +10,7 @@ pub fn opens_in_app(url: &Url) -> bool {
     if url.scheme() == "about" && url.path() == "blank" {
         return true;
     }
-    if !matches!(url.scheme(), "http" | "https") || is_link_shim(url) {
-        return false;
-    }
-    on_host(url, "messenger.com")
-        || (on_host(url, "facebook.com")
-            && FACEBOOK_POPUP_PATHS
-                .iter()
-                .any(|path| matches_path(url.path(), path)))
+    crate::site::current().opens_in_app(url)
 }
 
 /// Do not treat iframe navigation as a user click. The injected script handles
@@ -60,18 +30,21 @@ pub fn allow_navigation<R: Runtime>(app: &AppHandle<R>, url: &Url) -> bool {
     }
 }
 
-pub fn open_external<R: Runtime>(app: &AppHandle<R>, url: &Url) {
+fn external_target(url: &Url) -> Option<Url> {
     let target = if is_link_shim(url) {
         unwrap_link_shim(url)
     } else {
         Some(url.clone())
     };
-    let Some(target) =
-        target.filter(|url| matches!(url.scheme(), "http" | "https" | "mailto" | "tel"))
-    else {
+    target
+        .filter(|u| matches!(u.scheme(), "http" | "https" | "mailto" | "tel"))
+        .map(strip_tracking)
+}
+
+pub fn open_external<R: Runtime>(app: &AppHandle<R>, url: &Url) {
+    let Some(target) = external_target(url) else {
         return;
     };
-    let target = strip_tracking(target);
     if let Err(err) = app.opener().open_url(target.as_str(), None::<&str>) {
         eprintln!("could not open external link: {err}");
     }
@@ -134,6 +107,37 @@ mod tests {
         assert!(!opens_in_app(&url(
             "https://l.messenger.com/l.php?u=https%3A%2F%2Fexample.com"
         )));
+    }
+
+    #[test]
+    fn only_web_mail_and_phone_links_leave_the_app() {
+        assert_eq!(
+            external_target(&url("https://example.com/?fbclid=a"))
+                .unwrap()
+                .as_str(),
+            "https://example.com/"
+        );
+        assert!(external_target(&url("mailto:a@example.com")).is_some());
+        assert!(external_target(&url("tel:+84123456789")).is_some());
+        assert_eq!(
+            external_target(&url(
+                "https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.com%2F%3Ffbclid%3Dabc"
+            ))
+            .unwrap()
+            .as_str(),
+            "https://example.com/"
+        );
+        for blocked in [
+            "file:///C:/Windows/System32/calc.exe",
+            "smb://attacker.example/share",
+            "search-ms:query=x&crumb=location:\\\\attacker.example\\share",
+            "ms-msdt:/id PCWDiagnostic",
+            "fb://profile/1",
+            "javascript:alert(1)",
+            "https://l.facebook.com/l.php?u=file%3A%2F%2F%2Fetc%2Fpasswd",
+        ] {
+            assert!(external_target(&url(blocked)).is_none(), "{blocked}");
+        }
     }
 
     #[test]

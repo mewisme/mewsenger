@@ -1,7 +1,7 @@
 // Observe only signals published by the Messenger web page.
 (() => {
   if (location.protocol !== 'https:' ||
-      !['messenger.com', 'www.messenger.com'].includes(location.hostname) ||
+      !window.__MEW_SITE__?.app_hosts?.includes(location.hostname) ||
       window !== window.top || window.__mewNotificationsInstalled) return;
   window.__mewNotificationsInstalled = true;
 
@@ -85,7 +85,7 @@
   const threadFrom = (href) => {
     try {
       const url = new URL(href, location.href);
-      if (!['messenger.com', 'www.messenger.com'].includes(url.hostname)) return null;
+      if (!window.__MEW_SITE__.app_hosts.includes(url.hostname)) return null;
       const match = url.pathname.match(/\/(?:messages\/)?t\/([^/?#]+)/);
       return match ? match[1] : null;
     } catch { return null; }
@@ -112,12 +112,25 @@
   let previousUnread = new Set();
   let knownMarker = false;
   let sentReset = false;
+  let unreadBaseline = false;
   const sync = () => {
     scheduled = false;
     const list = unreadThreads();
     const currentUnread = new Set(list);
     const loadedChats = document.querySelectorAll('a[href*="/t/"]').length > 0;
     if (list.length > 0 || loadedChats) knownMarker = true;
+    // The first complete conversation list may contain old unread items.
+    // Never issue a burst of historical notifications on startup/reload.
+    if (loadedChats && unreadBaseline &&
+        (document.hidden || !document.hasFocus()) &&
+        OriginalNotification?.permission !== 'denied') {
+      for (const thread of currentUnread) {
+        if (!previousUnread.has(thread) && validId(thread)) {
+          send({ kind: 'new_unread', thread_id: thread });
+        }
+      }
+    }
+    if (loadedChats) unreadBaseline = true;
     if (knownMarker) {
       const signature = [...list].sort().join('|');
       if (signature !== lastState) {
@@ -143,6 +156,7 @@
         lastState = null;
         knownMarker = false;
         previousUnread = new Set();
+        unreadBaseline = false;
         send({ kind: 'reset' });
         sentReset = true;
       }
@@ -157,6 +171,7 @@
     subtree: true, childList: true, attributes: true, attributeFilter: ['aria-label'],
   });
   document.addEventListener('visibilitychange', queue);
+  window.addEventListener('blur', queue);
   window.addEventListener('focus', queue);
   window.addEventListener('popstate', queue);
   window.addEventListener('hashchange', queue);

@@ -3,6 +3,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "notification_event",
             "current_status",
+            "test_notification",
             "show_credits",
         ]),
     ))

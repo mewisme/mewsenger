@@ -1,22 +1,20 @@
 // Messenger can handle link clicks in React without a full navigation.
 // Open external links as popups so Tauri hands them to the default browser.
 (() => {
-  // Do not touch Facebook login pages or unrelated popup/iframe origins.
-  if (location.protocol !== 'https:' ||
-      !['messenger.com', 'www.messenger.com'].includes(location.hostname)) return;
+  // Site rules come from src-tauri/site.json via the injected prelude.
+  // Do not touch unrelated popup/iframe origins, and do nothing without it.
+  const site = window.__MEW_SITE__;
+  if (!site || location.protocol !== 'https:' || !site.app_hosts.includes(location.hostname)) return;
 
-  const facebookPopupPaths = [
-    '/messages', '/messenger_media', '/groupcall', '/videocall',
-    '/login', '/checkpoint', '/dialog', '/connect',
-  ];
   const onHost = (host, domain) => host === domain || host.endsWith(`.${domain}`);
   const matchesPath = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
   const isShim = (url) =>
-    ['l.messenger.com', 'l.facebook.com', 'lm.facebook.com'].includes(url.hostname) && url.pathname === '/l.php';
+    site.link_shim_hosts.includes(url.hostname) && url.pathname === '/l.php';
   const opensInApp = (url) =>
     !isShim(url) &&
-    (onHost(url.hostname, 'messenger.com') ||
-      (onHost(url.hostname, 'facebook.com') && facebookPopupPaths.some((path) => matchesPath(url.pathname, path))));
+    site.in_app_hosts.some((rule) =>
+      onHost(url.hostname, rule.domain) &&
+      (!rule.paths || rule.paths.some((path) => matchesPath(url.pathname, path))));
 
   document.addEventListener('click', (event) => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey ||

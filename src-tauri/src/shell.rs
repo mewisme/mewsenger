@@ -4,7 +4,7 @@ use tauri::{
     Window,
 };
 
-use crate::{open_popup, DESKTOP_SCRIPT, LINK_SCRIPT, MESSENGER_URL, NOTIFICATIONS_SCRIPT};
+use crate::{open_popup, DESKTOP_SCRIPT, LINK_SCRIPT, NOTIFICATIONS_SCRIPT};
 
 pub const REMOTE: &str = "messenger";
 pub const TITLEBAR: &str = "titlebar";
@@ -78,12 +78,13 @@ pub fn resize(window: &Window) -> tauri::Result<()> {
 
 pub fn mount(app: &AppHandle, window: &Window) -> tauri::Result<()> {
     let (width, height) = bounds(window)?;
-    let url = Url::parse(MESSENGER_URL).expect("valid initial URL");
+    let url = crate::site::current().start_url().clone();
     let navigation_app = app.clone();
     let popup_app = app.clone();
 
     window.add_child(
         WebviewBuilder::new(REMOTE, WebviewUrl::External(url))
+            .initialization_script(crate::site::current().prelude())
             .initialization_script(LINK_SCRIPT)
             .initialization_script(DESKTOP_SCRIPT)
             .initialization_script(NOTIFICATIONS_SCRIPT)

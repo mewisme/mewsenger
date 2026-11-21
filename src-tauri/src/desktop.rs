@@ -97,6 +97,16 @@ fn dispatch(app: &AppHandle, id: &str) {
                 });
             }
         }
+        "notification-preview" => {
+            if let Some(state) = app.try_state::<std::sync::Mutex<crate::prefs::Prefs>>() {
+                if let Ok(mut guard) = state.lock() {
+                    guard.notification_preview = !guard.notification_preview;
+                    if let Err(error) = crate::prefs::save(app, &guard) {
+                        eprintln!("could not save preferences: {error}");
+                    }
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -117,6 +127,17 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     }) {
         eprintln!("could not register notification actions: {error}");
     }
+    let preview = app
+        .state::<std::sync::Mutex<crate::prefs::Prefs>>()
+        .lock()
+        .map(|p| p.notification_preview)
+        .unwrap_or(true);
+    let preview_item = tauri::menu::CheckMenuItemBuilder::with_id(
+        "notification-preview",
+        "Show message previews in notifications",
+    )
+    .checked(preview)
+    .build(app)?;
     let menu = MenuBuilder::new(app)
         .text("show", "Show Messenger")
         .text("search", "Search chats")
@@ -133,6 +154,8 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
         .text("reload", "Reload Messenger")
         .text("account", "Account menu")
         .text("logout", "Sign out")
+        .separator()
+        .item(&preview_item)
         .separator()
         .text("hide", "Hide Messenger")
         .text("quit", "Quit")

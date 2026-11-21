@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "allow-show-credits",
-    "allow-current-status"
+    "allow-current-status",
+    "allow-test-notification"
   ]
 }

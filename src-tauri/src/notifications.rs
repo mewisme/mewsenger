@@ -8,8 +8,25 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, EventTarget, Manager, State, Url, Webview};
 use tauri_plugin_notification::NotificationExt;
 
-const HOSTS: &[&str] = &["messenger.com", "www.messenger.com"];
 const MAX_TOASTS_PER_MINUTE: usize = 12;
+
+fn with_sound<R: tauri::Runtime>(
+    b: tauri_plugin_notification::NotificationBuilder<R>,
+) -> tauri_plugin_notification::NotificationBuilder<R> {
+    if cfg!(windows) {
+        b.sound("Default")
+    } else {
+        b
+    }
+}
+
+fn notification_text(preview: bool, title: String, body: String) -> (String, String) {
+    if preview {
+        (title, body)
+    } else {
+        ("Messenger".into(), "New message".into())
+    }
+}
 
 #[derive(Default)]
 pub struct NotificationState {
@@ -39,9 +56,7 @@ fn thread_url(thread: &str) -> Option<Url> {
     if !routable_thread(thread) {
         return None;
     }
-    let mut url = Url::parse("https://www.messenger.com/").ok()?;
-    url.path_segments_mut().ok()?.extend(["t", thread]);
-    Some(url)
+    crate::site::current().thread_url(thread)
 }
 
 fn clear_thread(state: &mut NotificationState, thread: &str) {
@@ -66,6 +81,29 @@ pub struct DesktopStatus {
     unread_count: Option<usize>,
 }
 
+fn trusted_status_view(webview: &Webview) -> bool {
+    webview.label() == "status"
+        && webview.window().label() == "main"
+        && webview
+            .url()
+            .is_ok_and(|url| crate::shell::local_asset_url(&url))
+}
+
+#[tauri::command]
+pub fn test_notification(app: AppHandle, webview: Webview) -> Result<(), String> {
+    if !trusted_status_view(&webview) {
+        return Err("local status view required".into());
+    }
+    with_sound(app.notification().builder())
+        .title("Messenger notification test")
+        .body("Desktop notification request sent from Messenger.")
+        .show()
+        .map_err(|error| {
+            eprintln!("could not send test notification: {error}");
+            "Windows notification request failed".into()
+        })
+}
+
 fn publish_status(app: &AppHandle, unread_count: Option<usize>) {
     // Do not send thread IDs, notification bodies, or account data to local UI.
     let _ = app.emit_to(
@@ -80,12 +118,8 @@ pub fn current_status(
     webview: Webview,
     state: State<'_, Mutex<NotificationState>>,
 ) -> Result<DesktopStatus, String> {
-    if webview.label() != "status" || webview.window().label() != "main" {
+    if !trusted_status_view(&webview) {
         return Err("local status view required".into());
-    }
-    let current = webview.url().map_err(|_| "local URL unavailable")?;
-    if !crate::shell::local_asset_url(&current) {
-        return Err("local origin required".into());
     }
     let unread_count = state.lock().map_err(|_| "status unavailable")?.unread;
     Ok(DesktopStatus { unread_count })
@@ -103,6 +137,9 @@ pub enum MessageEvent {
     Unread {
         threads: Vec<String>,
     },
+    NewUnread {
+        thread_id: String,
+    },
     Read {
         thread_id: String,
     },
@@ -110,10 +147,7 @@ pub enum MessageEvent {
 }
 
 pub(crate) fn trusted(url: &Url, label: &str) -> bool {
-    label == "messenger"
-        && url.scheme() == "https"
-        && url.port().is_none()
-        && url.host_str().is_some_and(|host| HOSTS.contains(&host))
+    label == "messenger" && crate::site::current().is_app_origin(url)
 }
 
 fn safe_string(value: &str, max: usize) -> Option<&str> {
@@ -125,7 +159,13 @@ fn safe_string(value: &str, max: usize) -> Option<&str> {
 
 fn trim_history(state: &mut NotificationState, now: Instant) {
     state.seen.retain(|key, time| {
-        let max_age = if key.starts_with("body:") { 15 } else { 600 };
+        let max_age = if key.starts_with("body:") {
+            15
+        } else if key.starts_with("unread:") {
+            45
+        } else {
+            600
+        };
         now.duration_since(*time) < Duration::from_secs(max_age)
     });
     while state
@@ -148,6 +188,18 @@ fn reset_view_state(state: &mut NotificationState) {
     state.unread = None;
     // Keep deduplication and rate limits across navigation and page reloads.
     // A remote page must not reset notification throttling.
+}
+
+fn should_show_background_unread(
+    state: &NotificationState,
+    thread_id: &str,
+    in_background: bool,
+) -> bool {
+    let key = format!("unread:{thread_id}");
+    in_background
+        && routable_thread(thread_id)
+        && !state.seen.contains_key(&key)
+        && state.rate.len() < MAX_TOASTS_PER_MINUTE
 }
 
 fn unread_icon(count: usize) -> tauri::image::Image<'static> {
@@ -233,6 +285,7 @@ pub fn notification_event(
     app: AppHandle,
     webview: Webview,
     state: State<'_, Mutex<NotificationState>>,
+    prefs: State<'_, Mutex<crate::prefs::Prefs>>,
     event: MessageEvent,
 ) -> Result<(), String> {
     let current = webview.url().map_err(|_| "origin unavailable")?;
@@ -263,12 +316,12 @@ pub fn notification_event(
             if notifications.rate.len() >= MAX_TOASTS_PER_MINUTE {
                 return Ok(());
             }
+            let preview = prefs.lock().map(|p| p.notification_preview).unwrap_or(true);
+            let (title, body) = notification_text(preview, title, body);
             let toast_id = notifications.next_toast_id.checked_add(1).unwrap_or(1);
             // Messenger can create its own browser toast. Only the JS fallback
             // reports notifications that require desktop delivery.
-            if let Err(error) = app
-                .notification()
-                .builder()
+            if let Err(error) = with_sound(app.notification().builder())
                 .id(toast_id)
                 .extra("messenger_fallback", true)
                 .title(title)
@@ -311,6 +364,37 @@ pub fn notification_event(
                 status_change = Some(Some(count));
             }
         }
+        MessageEvent::NewUnread { thread_id } => {
+            let window = app.get_window("main").ok_or("main window unavailable")?;
+            let in_background =
+                !window.is_visible().unwrap_or(true) || !window.is_focused().unwrap_or(true);
+            if !should_show_background_unread(&notifications, &thread_id, in_background) {
+                return Ok(());
+            }
+            let toast_id = notifications.next_toast_id.checked_add(1).unwrap_or(1);
+            if let Err(error) = with_sound(app.notification().builder())
+                .id(toast_id)
+                .extra("messenger_fallback", true)
+                .title("Messenger")
+                .body("New unread conversation")
+                .show()
+            {
+                eprintln!("could not show unread notification: {error}");
+                return Err("native notification unavailable".into());
+            }
+            notifications.next_toast_id = toast_id;
+            notifications
+                .seen
+                .insert(format!("unread:{thread_id}"), now);
+            notifications.rate.push_back(now);
+            notifications.pending.insert(
+                toast_id,
+                PendingToast {
+                    thread: thread_id,
+                    created: now,
+                },
+            );
+        }
         MessageEvent::Read { thread_id } => {
             safe_string(&thread_id, 160).ok_or("invalid conversation id")?;
             // Windows cannot remove the delivered OS toast with this plugin.
@@ -333,6 +417,18 @@ pub fn notification_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hides_message_text_when_previews_are_off() {
+        assert_eq!(
+            notification_text(true, "Alice".into(), "hi".into()),
+            ("Alice".to_string(), "hi".to_string())
+        );
+        assert_eq!(
+            notification_text(false, "Alice".into(), "hi".into()),
+            ("Messenger".to_string(), "New message".to_string())
+        );
+    }
     #[test]
     fn only_messenger_https_in_the_main_window_is_trusted() {
         assert!(trusted(
@@ -483,5 +579,21 @@ mod tests {
             thread_url("fbid:123_A").unwrap().host_str(),
             Some("www.messenger.com")
         );
+    }
+
+    #[test]
+    fn background_unread_requires_valid_thread_and_free_rate_budget() {
+        let now = Instant::now();
+        let mut state = NotificationState::default();
+        assert!(!should_show_background_unread(&state, "123", false));
+        assert!(!should_show_background_unread(&state, "bad/path", true));
+        assert!(should_show_background_unread(&state, "123", true));
+        state.seen.insert("unread:123".into(), now);
+        assert!(!should_show_background_unread(&state, "123", true));
+        assert!(should_show_background_unread(&state, "456", true));
+        state
+            .rate
+            .extend(std::iter::repeat_n(now, MAX_TOASTS_PER_MINUTE));
+        assert!(!should_show_background_unread(&state, "456", true));
     }
 }

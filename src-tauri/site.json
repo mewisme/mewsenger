@@ -1,0 +1,13 @@
+{
+  "start_url": "https://www.messenger.com/",
+  "app_hosts": ["messenger.com", "www.messenger.com"],
+  "in_app_hosts": [
+    { "domain": "messenger.com" },
+    {
+      "domain": "facebook.com",
+      "paths": ["/messages", "/messenger_media", "/groupcall", "/videocall", "/login", "/checkpoint", "/dialog", "/connect"]
+    }
+  ],
+  "link_shim_hosts": ["l.messenger.com", "l.facebook.com", "lm.facebook.com"],
+  "thread_path": ["t"]
+}

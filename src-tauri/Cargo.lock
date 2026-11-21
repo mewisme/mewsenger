@@ -2163,6 +2163,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-positioner",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

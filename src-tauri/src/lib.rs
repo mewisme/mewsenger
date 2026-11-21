@@ -1,17 +1,19 @@
+mod appid;
 mod desktop;
 mod links;
 mod notifications;
+mod prefs;
 mod shell;
+mod site;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tauri::{
     webview::{NewWindowFeatures, NewWindowResponse},
-    AppHandle, Runtime, Url, WebviewUrl, WebviewWindowBuilder, WindowBuilder, WindowEvent,
+    AppHandle, Manager, Runtime, Url, WebviewUrl, WebviewWindowBuilder, WindowBuilder, WindowEvent,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
-const MESSENGER_URL: &str = "https://www.messenger.com";
 const LINK_SCRIPT: &str = include_str!("links.js");
 const DESKTOP_SCRIPT: &str = include_str!("desktop.js");
 const NOTIFICATIONS_SCRIPT: &str = include_str!("notifications.js");
@@ -33,6 +35,7 @@ fn open_popup<R: Runtime>(
     let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
         .title("Messenger")
         .window_features(features)
+        .initialization_script(site::current().prelude())
         .initialization_script(LINK_SCRIPT)
         .initialization_script(DESKTOP_SCRIPT)
         .initialization_script(NOTIFICATIONS_SCRIPT)
@@ -57,6 +60,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             notifications::notification_event,
             notifications::current_status,
+            notifications::test_notification,
             shell::show_credits
         ])
         .on_window_event(|window, event| {
@@ -75,6 +79,8 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            appid::register(app.handle());
+            app.manage(std::sync::Mutex::new(prefs::load(app.handle())));
             let window = WindowBuilder::new(app, "main")
                 .title("Messenger")
                 .inner_size(800.0, 600.0)

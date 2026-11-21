@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'vitest';
 import vm from 'node:vm';
+import { site, facebookSite } from './site-fixture.mjs';
 
 const script = readFileSync(new URL('./links.js', import.meta.url), 'utf8');
 
 function click(href, {
   button = 0, download = false, ctrlKey = false, metaKey = false,
   shiftKey = false, altKey = false, pageUrl = 'https://www.messenger.com/t/123',
+  siteProfile = site,
 } = {}) {
   const handlers = new Map();
   const opened = [];
@@ -21,7 +23,7 @@ function click(href, {
     Element,
     location: new URL(pageUrl),
     document: { addEventListener: (name, listener) => handlers.set(name, listener) },
-    window: { open: (...args) => opened.push(args) },
+    window: { open: (...args) => opened.push(args), __MEW_SITE__: siteProfile },
   });
   const event = {
     button,
@@ -98,6 +100,20 @@ test('does not inject behavior into unrelated or insecure web origins', () => {
     assert.equal(opened.length, 0);
     assert.equal(event.defaultPrevented, false);
   }
+});
+
+test('link rules follow the configured site profile', () => {
+  const facebookPage = 'https://www.facebook.com/messages/t/1';
+  const stays = click('https://www.facebook.com/groupcall/1', { pageUrl: facebookPage, siteProfile: facebookSite });
+  assert.equal(stays.event.defaultPrevented, false);
+  assert.equal(stays.opened.length, 0);
+  const leaves = click('https://www.facebook.com/reel/1', { pageUrl: facebookPage, siteProfile: facebookSite });
+  assert.equal(leaves.event.defaultPrevented, true);
+  assert.equal(leaves.opened.length, 1);
+  const messengerPage = click('https://example.com/', { siteProfile: facebookSite });
+  assert.equal(messengerPage.handlers.size, 0);
+  const inert = click('https://example.com/', { siteProfile: null });
+  assert.equal(inert.handlers.size, 0);
 });
 
 test('does not override the native context menu', () => {
