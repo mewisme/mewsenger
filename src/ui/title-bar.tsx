@@ -68,7 +68,7 @@ export function TitleBar() {
         </Button>
         <Button type="button" size="icon" variant="ghost" disabled={!native}
           aria-label="Close window" title="Close"
-          className="h-10 w-11 rounded-none hover:bg-red-600 hover:text-white"
+          className="h-10 w-11 rounded-none hover:bg-red-600 hover:text-white dark:hover:bg-red-600"
           onClick={() => void window?.close().catch(() => {})}>
           <X aria-hidden="true" className="size-4" />
         </Button>
