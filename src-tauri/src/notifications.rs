@@ -5,6 +5,7 @@ use std::{
 };
 
 use serde::Deserialize;
+use tauri::Emitter;
 use tauri::{AppHandle, Manager, State, Url, Webview};
 use tauri_plugin_notification::NotificationExt;
 
@@ -178,6 +179,44 @@ fn reply_target(registry: &Registry, id: i32, now: Instant) -> Option<(String, S
         .then(|| (toast.account.clone(), toast.thread.clone()))
 }
 
+/// How a message for an account is announced.
+#[derive(Debug, PartialEq, Eq)]
+enum Delivery {
+    /// The account's tab is on screen in the window in use.
+    None,
+    /// Another tab is in front of the window in use: its tab says so.
+    TabAlert,
+    /// The window is hidden or not in use: a system toast.
+    Toast,
+}
+
+fn delivery(window_in_use: bool, account_shown: bool) -> Delivery {
+    match (window_in_use, account_shown) {
+        (true, true) => Delivery::None,
+        (true, false) => Delivery::TabAlert,
+        (false, _) => Delivery::Toast,
+    }
+}
+
+/// True when the main window is visible and has the focus.
+fn window_in_use(app: &AppHandle) -> bool {
+    app.get_window("main").is_some_and(|window| {
+        window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false)
+    })
+}
+
+/// Shows an alert on the account's tab; it lasts until the tab is opened.
+fn alert_tab(app: &AppHandle, account: &str, title: &str, body: &str) {
+    let _ = app.emit_filter(
+        "tab-alert",
+        serde_json::json!({ "account": account, "title": title, "body": body }),
+        |target| {
+            matches!(target, tauri::EventTarget::Webview { label }
+                if label.starts_with("titlebar-"))
+        },
+    );
+}
+
 /// True when nobody is looking at the account's page: its tab is not the one
 /// on screen, or the main window is hidden or unfocused.
 fn in_background(app: &AppHandle, account: &str) -> bool {
@@ -300,7 +339,7 @@ fn quick_reply(app: &AppHandle, tag: &str, text: &str) {
 #[tauri::command]
 pub fn test_notification(app: AppHandle, webview: Webview) -> Result<(), String> {
     use crate::shell::LocalKind;
-    if !crate::shell::local_webview(&webview, &[LocalKind::Status, LocalKind::Settings]) {
+    if !crate::shell::local_webview(&webview, &[LocalKind::Settings]) {
         return Err("local view required".into());
     }
     deliver(
@@ -327,9 +366,6 @@ pub enum MessageEvent {
     Unread {
         threads: Vec<String>,
     },
-    NewUnread {
-        thread_id: String,
-    },
     Read {
         thread_id: String,
     },
@@ -343,6 +379,10 @@ pub enum MessageEvent {
     },
     Shortcut {
         action: String,
+    },
+    AccountName {
+        name: String,
+        picture: Option<String>,
     },
     Reset,
 }
@@ -364,8 +404,6 @@ fn trim_history(state: &mut NotificationState, now: Instant) {
     state.seen.retain(|key, time| {
         let max_age = if key.starts_with("body:") {
             15
-        } else if key.starts_with("unread:") {
-            45
         } else {
             600
         };
@@ -387,18 +425,6 @@ fn reset_view_state(registry: &mut Registry, account: &str) {
     state.session = None;
     // Keep deduplication and rate limits across navigation and page reloads.
     // A remote page must not reset notification throttling.
-}
-
-fn should_show_background_unread(
-    state: &NotificationState,
-    thread_id: &str,
-    in_background: bool,
-) -> bool {
-    let key = format!("unread:{thread_id}");
-    in_background
-        && routable_thread(thread_id)
-        && !state.seen.contains_key(&key)
-        && state.rate.len() < MAX_TOASTS_PER_MINUTE
 }
 
 fn unread_icon(count: usize) -> tauri::image::Image<'static> {
@@ -533,11 +559,28 @@ pub fn notification_event(
                     return Ok(());
                 }
             }
+            // Messenger raises its notifications whenever its page lacks focus,
+            // which also holds while this account's tab is in front of a
+            // focused window. A message for the tab on screen needs nothing;
+            // one for another tab, with the window in use, shows on that tab;
+            // otherwise a system toast.
+            let shown = crate::accounts::snapshot(&app).shown_account() == account;
+            let how = delivery(window_in_use(&app), shown);
+            if how == Delivery::None {
+                return Ok(());
+            }
             let preview = prefs.lock().map(|p| p.notification_preview).unwrap_or(true);
             let (title, body) = notification_text(preview, title, body);
+            if how == Delivery::TabAlert {
+                alert_tab(&app, &account, &title, &body);
+                let state = registry.state(&account);
+                state.seen.insert(id, now);
+                state.rate.push_back(now);
+                return Ok(());
+            }
             let toast_id = registry.next_id();
-            // Messenger can create its own browser toast. Only the JS fallback
-            // reports notifications that require desktop delivery.
+            // The page reports the notifications Messenger raises while away
+            // (and any a browser notification could not show); the app shows them.
             let routable = thread_id.as_deref().filter(|t| routable_thread(t));
             let reply = QUICK_REPLY && routable.is_some() && in_background(&app, &account);
             deliver(
@@ -586,47 +629,15 @@ pub fn notification_event(
                 unread_change = true;
             }
         }
-        MessageEvent::NewUnread { thread_id } => {
-            let in_background = in_background(&app, &account);
-            if !should_show_background_unread(registry.state(&account), &thread_id, in_background) {
-                return Ok(());
-            }
-            let toast_id = registry.next_id();
-            deliver(
-                &app,
-                &account,
-                toast_id,
-                thread_group(
-                    &account,
-                    Some(&thread_id)
-                        .filter(|t| routable_thread(t))
-                        .map(|t| t.as_str()),
-                ),
-                "Messenger".into(),
-                "New unread conversation".into(),
-                false,
-            )?;
-            registry.next_toast_id = toast_id;
-            {
-                let state = registry.state(&account);
-                state.seen.insert(format!("unread:{thread_id}"), now);
-                state.rate.push_back(now);
-            }
-            registry.pending.insert(
-                toast_id,
-                PendingToast {
-                    account: account.clone(),
-                    thread: thread_id,
-                    created: now,
-                },
-            );
-        }
         MessageEvent::Read { thread_id } => {
             safe_string(&thread_id, 160).ok_or("invalid conversation id")?;
             // Stop routing this thread's stale notifications and remove its
             // delivered toasts from Action Center (Windows toasts we created).
             clear_thread(&mut registry, &account, &thread_id);
             remove_thread_toasts(&app, &account, &thread_id);
+        }
+        MessageEvent::AccountName { name, picture } => {
+            crate::accounts::set_display_name(&app, &account, &name, picture.as_deref())?;
         }
         MessageEvent::Shortcut { action } => {
             crate::accounts::shortcut(&app, &action)?;
@@ -969,19 +980,11 @@ mod tests {
     }
 
     #[test]
-    fn background_unread_requires_valid_thread_and_free_rate_budget() {
-        let now = Instant::now();
-        let mut state = NotificationState::default();
-        assert!(!should_show_background_unread(&state, "123", false));
-        assert!(!should_show_background_unread(&state, "bad/path", true));
-        assert!(should_show_background_unread(&state, "123", true));
-        state.seen.insert("unread:123".into(), now);
-        assert!(!should_show_background_unread(&state, "123", true));
-        assert!(should_show_background_unread(&state, "456", true));
-        state
-            .rate
-            .extend(std::iter::repeat_n(now, MAX_TOASTS_PER_MINUTE));
-        assert!(!should_show_background_unread(&state, "456", true));
+    fn a_message_is_announced_where_the_user_is_looking() {
+        assert_eq!(delivery(true, true), Delivery::None);
+        assert_eq!(delivery(true, false), Delivery::TabAlert);
+        assert_eq!(delivery(false, true), Delivery::Toast);
+        assert_eq!(delivery(false, false), Delivery::Toast);
     }
 
     #[test]
