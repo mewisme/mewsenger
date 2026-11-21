@@ -64,8 +64,8 @@ Run up to four Messenger accounts at once.
 
 ## Portable and release builds
 
-- **Portable (Windows):** `pnpm tauri build --no-bundle -- --features portable` produces `src-tauri/target/release/messenger.exe`, which runs alone from any folder (WebView2 is a system component). It is unsigned, so Windows SmartScreen may warn on first launch.
-- **Release:** run `pnpm app-upver`, push the tag `vX.Y.Z`. The `Release desktop` workflow builds the signed NSIS/MSI installers, `latest.json` and the portable executable and uploads them to a **draft** release; publishing is a manual step. It refuses to run while the public key in `tauri.release.conf.json` is still the placeholder. Create the key pair once with `pnpm tauri signer generate -w src-tauri/key`, commit only the public key text into the config and store the private key and its password as the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Only Windows is built; macOS signing is not set up.
+- **Portable (Windows):** `pnpm tauri build --no-bundle -- --features portable` produces `src-tauri/target/release/mewsenger.exe`, which runs alone from any folder (WebView2 is a system component). It is unsigned, so Windows SmartScreen may warn on first launch.
+- **Release:** run `pnpm app-upver`, push the tag `vX.Y.Z`. The `Release desktop` workflow builds the signed NSIS/MSI installers, `latest.json` and the portable executable and uploads them to a **draft** release; publishing is a manual step. The public key in `tauri.release.conf.json` verifies updates; the matching private key lives outside the repo and is stored as the repository secret `TAURI_SIGNING_PRIVATE_KEY` (the key has no password, so `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` stays unset). The app checks `releases/latest/download/latest.json`, so an update is offered only after the draft release is published. To rotate the key, run `pnpm tauri signer generate -w <path>`, replace the public key and the secret; installed builds then need a manual reinstall.
 
 ## Known limitations
 
