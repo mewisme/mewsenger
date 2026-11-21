@@ -1,0 +1,12 @@
+{
+  "identifier": "split",
+  "description": "Split layout view: reports divider drags only",
+  "webviews": [
+    "split"
+  ],
+  "permissions": [
+    "allow-set-split-layout",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

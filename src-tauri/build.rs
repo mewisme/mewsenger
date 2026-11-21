@@ -12,6 +12,13 @@ fn main() {
             "check_update",
             "install_update",
             "get_diagnostics",
+            "set_split_layout",
+            "list_accounts",
+            "add_account",
+            "rename_account",
+            "remove_account",
+            "set_layout",
+            "open_account",
         ]),
     ))
     .expect("could not prepare Tauri application");

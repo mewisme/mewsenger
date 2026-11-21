@@ -6,7 +6,7 @@
     "linux"
   ],
   "webviews": [
-    "status"
+    "status-*"
   ],
   "permissions": []
 }

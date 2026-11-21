@@ -1,7 +1,7 @@
 {
   "identifier": "titlebar",
   "description": "Local window chrome controls only",
-  "webviews": ["titlebar"],
+  "webviews": ["titlebar-*"],
   "permissions": [
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",

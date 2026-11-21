@@ -14,6 +14,12 @@
     "allow-install-update",
     "allow-get-diagnostics",
     "allow-test-notification",
+    "allow-list-accounts",
+    "allow-add-account",
+    "allow-rename-account",
+    "allow-remove-account",
+    "allow-set-layout",
+    "allow-open-account",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"
