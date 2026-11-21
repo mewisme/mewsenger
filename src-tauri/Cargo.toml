@@ -1,6 +1,6 @@
 [package]
 name = "mewsenger"
-version = "0.1.14"
+version = "0.2.0"
 description = "Desktop client for Messenger"
 authors = ["Mew"]
 edition = "2021"
