@@ -12,7 +12,7 @@ The main native window contains three separate WebViews: a **custom 40px title b
 
 The footer displays the installed application version, local network status and unread count from native state. Unverified values remain unknown until synchronized. **Credits** opens a separate native local window to avoid clipping inside the narrow footer; it shows the bundled Messenger icon, actual version, and an explicit Close button. The custom title bar also uses the icon from `src-tauri/icons/`. The app follows the system light/dark appearance.
 
-The unread badge is updated only from recognized Messenger unread markers; missing markers remain unknown rather than being reported as zero. The footer displays **Offline** when the local browser reports no network and **Status unavailable** otherwise: an online network does not prove the Messenger session is connected. The disabled update control is a placeholder because no signed update provider is configured.
+The unread badge is updated only from recognized Messenger unread markers; missing markers remain unknown rather than being reported as zero. The footer displays **Offline** when the local browser reports no network, **Connected** or **Signed out** when the page positively shows a signed-in chat list or a login screen, and **Status unavailable** otherwise: an online network alone does not prove the Messenger session is connected. The update control stays disabled with "Updates are not configured" unless a signed update source is built in. A download indicator appears after a file download starts and, once finished, reveals the file in Explorer.
 
 Clicking a visible native fallback toast brings Messenger to the foreground and opens its conversation only when the notification plugin supplies a still-valid matching ID and Messenger supplied a safely routable conversation ID. Unrecognized, expired, or already-read notifications only reveal Messenger. The plugin cannot guarantee activation from Windows Action Center or remove delivered Windows toast history.
 
@@ -28,7 +28,7 @@ Tauri's native multi-WebView support requires the Rust `unstable` feature on des
 ## Desktop controls
 
 - **Photo viewer:** Ctrl + mouse wheel (trackpad pinch in WebView2) to zoom, double-click a photo to toggle zoom, then scroll or drag the enlarged photo. Zoom resets when the viewer/photo changes.
-- **Chats:** Ctrl+K focuses Messenger search; Ctrl+Shift+N opens Messenger's new-message control if present; Ctrl+Alt+Up/Down moves between chats when not editing text. On macOS, use Command in place of Ctrl.
+- **Chats:** Ctrl+K focuses Messenger search; Ctrl+Shift+N opens Messenger's new-message control if present; Ctrl+Alt+Up/Down moves between chats when not editing text. Ctrl+1 to Ctrl+9 opens the Nth chat in the list; Ctrl+Shift+] / Ctrl+Shift+[ (and Ctrl+Tab / Ctrl+Shift+Tab) move to the next / previous chat. These are ignored while another text field has focus. On macOS, use Command in place of Ctrl.
 - **Account:** use **Account menu** or **Sign out** from the native tray menu. These actions use Messenger's own controls and may be unavailable when Messenger changes its page layout.
 - **Window:** drag the custom top bar to move the main window, or double-click it to maximize/restore. The window buttons minimize, maximize/restore, and close. Closing the main window hides it to the system tray when available. Double-click the tray icon, or select **Show Messenger**, to restore it. Select **Quit** to exit the process. If the tray is unavailable, closing the window exits normally.
 - **Navigation:** the tray menu provides Back, Forward, Reload and photo zoom controls. External links open in the default browser without Facebook fbclid tracking.
@@ -42,8 +42,28 @@ Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, n
 - Where the chat list contains explicit unread markers, the app counts distinct conversations and shows their count as a Windows taskbar overlay (or a system badge on supported platforms). It does not guess from the number shown in the page title.
 - Duplicate fallback notifications are suppressed for ten minutes when Messenger supplies a notification tag, or fifteen seconds when only text is available; at most twelve can be sent per minute. No message content or session tokens are persisted or logged.
 - The native notification plugin can identify a clicked fallback toast while it is still visible. The app associates each such toast with a bounded conversation ID, focuses Messenger and navigates to that conversation only while the mapping is valid. A mapping expires after ten minutes, is used once, and is removed when an earlier recognized unread marker disappears from the focused conversation. Fallbacks without reliable IDs only focus Messenger.
-- Windows Action Center notifications are **not** individually removable using the installed plugin. Reading a conversation cancels its local click routing but does not remove previously delivered Windows toasts or unrelated conversation notifications. Clicking an old Action Center entry may not activate the app at all; background delivery only works while the application process and Messenger's notification infrastructure are running.
+- Toasts created by this app on Windows use the native notification API, so reading a conversation removes that conversation's delivered toasts from Action Center. Toasts that fall back to the plugin cannot be removed individually, and clicking an old Action Center entry may not activate the app at all; background delivery only works while the application process and Messenger's notification infrastructure are running.
 - Delivery depends on Messenger's notification APIs and the app process being open. Notifications are not guaranteed after quitting the app or when Messenger sends them exclusively through a Service Worker that the page cannot observe.
+
+## Settings, startup and updates
+
+- **Settings** opens from the tray menu (**Settings…**) or the gear in the status bar. It holds the message-preview switch (shared with the tray check item), **Launch Messenger when I sign in to Windows**, the update control and **Copy diagnostics**. Preferences are stored in `preferences.json` in the app config directory; launch at login is read from and written to the operating system, never stored by the app.
+- **Launch at login** is off by default. When enabled the app starts with `--minimized`: the window stays hidden and the tray icon is used (if the tray is unavailable the window is shown so the app is never invisible). A second launch does not start another copy; it shows the running window.
+- **Updates:** the status bar and Settings show *Updates are not configured* until a signed update source is built in. Release builds merge `src-tauri/tauri.release.conf.json`, which holds the public key and the `latest.json` endpoint on GitHub Releases. The portable executable cannot replace itself, so its update action opens the releases page instead. The status bar never shows a download percentage because none is available.
+- **Diagnostics** copy only versions (app, Tauri, WebView2), OS and architecture, update state, whether the session and unread count are known. No paths, URLs, messages or account data.
+
+## Portable and release builds
+
+- **Portable (Windows):** `pnpm tauri build --no-bundle -- --features portable` produces `src-tauri/target/release/messenger.exe`, which runs alone from any folder (WebView2 is a system component). It is unsigned, so Windows SmartScreen may warn on first launch.
+- **Release:** run `pnpm app-upver`, push the tag `vX.Y.Z`. The `Release desktop` workflow builds the signed NSIS/MSI installers, `latest.json` and the portable executable and uploads them to a **draft** release; publishing is a manual step. It refuses to run while the public key in `tauri.release.conf.json` is still the placeholder. Create the key pair once with `pnpm tauri signer generate -w src-tauri/key`, commit only the public key text into the config and store the private key and its password as the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Only Windows is built; macOS signing is not set up.
+
+## Known limitations
+
+- **No upload progress.** WebView2 offers no official upload callback and wrapping `fetch`/`XMLHttpRequest` would touch Messenger request bodies, which the app avoids.
+- **No download percentage.** Tauri reports only that a download started and finished; the status bar shows the file name and a final state.
+- **Toast removal** works only for toasts created by this app through Windows' own notification API. Toasts shown by the plugin fallback cannot be removed individually. Quick reply from a toast is implemented but disabled until it has been verified against a live session.
+- **Hide typing indicator, conversation preloading, Messenger preferences and call permissions** depend on probes of a live session (`docs/probes/`). All rows are currently `untested`, so none of these features exist yet.
+- The app's own windows follow the operating system theme; whether Messenger's page follows it is untested (see `docs/probes/messenger-settings-and-calls.md`), and the app has no separate theme switch.
 
 ## Prerequisites
 
