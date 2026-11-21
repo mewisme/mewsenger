@@ -1,28 +1,40 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
-import { StatusBar } from "@/ui/status-bar";
+import { StatusBar, type ConnectionState } from "@/ui/status-bar";
 import { TitleBar } from "@/ui/title-bar";
-import { resolveLocalView } from "@/ui/local-view";
+import { parseAccounts, parseSplit, resolveLocalView } from "@/ui/local-view";
 import { Settings } from "@/ui/settings";
+import { SplitView } from "@/ui/split";
 import type { DownloadStatus } from "@/ui/status-types";
 import { useUpdate } from "@/ui/use-update";
 
-type NativeStatus = { unread_count: number | null; session?: boolean | null };
+type NativeStatus = {
+  account: string;
+  unread_count: number | null;
+  session?: boolean | null;
+};
+
+type AccountStatus = { unread: number | null; session: boolean | null };
+
+const unknownStatus: AccountStatus = { unread: null, session: null };
 
 export function DesktopApp() {
   const [version, setVersion] = useState("Version unavailable");
+  const search = typeof window !== "undefined" ? window.location.search : "";
   const localView = resolveLocalView(
-    typeof window !== "undefined" ? window.location.search : "",
+    search,
     isTauri() ? getCurrentWebview().label : null,
   );
   const titlebarView = localView === "titlebar";
   const settingsView = localView === "settings";
+  const splitView = localView === "split";
   const statusView = localView === "status";
-  const [unreadCount, setUnreadCount] = useState<number | null>(null);
-  const [session, setSession] = useState<boolean | null>(null);
+  const shown = useMemo(() => parseAccounts(search), [search]);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [statuses, setStatuses] = useState<Record<string, AccountStatus>>({});
   const [download, setDownload] = useState<DownloadStatus | null>(null);
   const { update, act } = useUpdate(statusView);
   const [connection, setConnection] = useState<"offline" | "unknown">(
@@ -41,29 +53,56 @@ export function DesktopApp() {
   useEffect(() => {
     if (!isTauri() || !statusView) return;
     let active = true;
-    let eventReceived = false;
+    const received = new Set<string>();
     let detach: (() => void) | undefined;
-    const accept = (count: number | null, nextSession?: boolean | null) => {
-      if (!active) return;
+    const accept = (status: NativeStatus) => {
+      if (!active || !shown.some((account) => account.id === status.account)) return;
+      const { unread_count: count, session } = status;
       // Only display a count that the native bridge has confirmed.
-      setUnreadCount(typeof count === "number" && Number.isSafeInteger(count) &&
-        count >= 0 ? count : null);
-      setSession(typeof nextSession === "boolean" ? nextSession : null);
+      setStatuses((previous) => ({
+        ...previous,
+        [status.account]: {
+          unread: typeof count === "number" && Number.isSafeInteger(count) && count >= 0
+            ? count : null,
+          session: typeof session === "boolean" ? session : null,
+        },
+      }));
     };
     void listen<NativeStatus>("desktop-status", (event) => {
-      eventReceived = true;
-      accept(event.payload.unread_count, event.payload.session);
+      received.add(event.payload.account);
+      accept(event.payload);
     }).then((unlisten) => {
       if (!active) {
         unlisten();
         return;
       }
       detach = unlisten;
-      return invoke<NativeStatus>("current_status")
+      return invoke<NativeStatus[]>("current_status")
         .then((snapshot) => {
-          if (!eventReceived) accept(snapshot.unread_count, snapshot.session);
+          for (const status of snapshot) {
+            if (!received.has(status.account)) accept(status);
+          }
         });
     }).catch(() => { /* Keep the unverified value unknown. */ });
+    return () => {
+      active = false;
+      detach?.();
+    };
+  }, [statusView, shown]);
+
+  useEffect(() => {
+    if (!isTauri() || !statusView) return;
+    let active = true;
+    let detach: (() => void) | undefined;
+    void listen<{ accounts: { id: string; name: string }[] }>("accounts-changed", (event) => {
+      if (!active) return;
+      const next: Record<string, string> = {};
+      for (const account of event.payload.accounts) next[account.id] = account.name;
+      setNames(next);
+    }).then((unlisten) => {
+      if (active) detach = unlisten;
+      else unlisten();
+    }).catch(() => { /* Names stay as they were when the view loaded. */ });
     return () => {
       active = false;
       detach?.();
@@ -103,16 +142,33 @@ export function DesktopApp() {
 
   if (settingsView) return <Settings version={version} />;
 
+  if (splitView) {
+    const { ids, ratio } = parseSplit(search);
+    return <SplitView ids={ids} ratio={ratio} />;
+  }
+
   function showSettings() {
     void invoke("show_settings").catch(() => { /* The tray menu offers the same window. */ });
+  }
+
+  function connectionOf(session: boolean | null): ConnectionState {
+    if (connection === "offline") return "offline";
+    return session === true ? "connected" : session === false ? "signed_out" : "unknown";
   }
 
   return (
     <main className="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-background">
       <div className="min-h-0 flex-1" aria-hidden="true" />
       <StatusBar
-        connection={connection === "offline" ? "offline" : session === true ? "connected" : session === false ? "signed_out" : "unknown"}
-        unreadCount={unreadCount}
+        accounts={shown.map((account) => {
+          const status = statuses[account.id] ?? unknownStatus;
+          return {
+            id: account.id,
+            name: names[account.id] ?? account.name,
+            connection: connectionOf(status.session),
+            unreadCount: status.unread,
+          };
+        })}
         onSettings={isTauri() ? showSettings : undefined}
         update={update}
         onUpdate={isTauri() ? act : undefined}

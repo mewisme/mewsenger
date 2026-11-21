@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DesktopApp } from "./app";
+
+type StatusPayload = { account: string; unread_count: number | null; session?: boolean | null };
 
 const runtime = vi.hoisted(() => ({
   available: true,
   getVersion: vi.fn(),
   invoke: vi.fn(),
   listen: vi.fn(),
-  statusListener: undefined as ((event: { payload: { unread_count: number | null; session?: boolean | null } }) => void) | undefined,
+  statusListener: undefined as ((event: { payload: StatusPayload }) => void) | undefined,
+  accountsListener: undefined as ((event: { payload: { accounts: { id: string; name: string }[] } }) => void) | undefined,
   unlisten: vi.fn(),
   view: "status",
 }));
@@ -43,20 +46,27 @@ beforeAll(() => {
   });
 });
 afterAll(() => vi.unstubAllGlobals());
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.history.pushState({}, "", "/");
+});
 beforeEach(() => {
   runtime.available = true;
   runtime.view = "status";
   runtime.statusListener = undefined;
+  runtime.accountsListener = undefined;
   runtime.unlisten.mockReset();
   runtime.listen.mockReset().mockImplementation((name, callback) => {
     if (name === "desktop-status") runtime.statusListener = callback;
+    if (name === "accounts-changed") runtime.accountsListener = callback;
     return Promise.resolve(runtime.unlisten);
   });
   runtime.invoke.mockReset().mockImplementation((name) =>
-    Promise.resolve(name === "current_status" ? { unread_count: null } : undefined));
+    Promise.resolve(name === "current_status" ? [{ account: "a1", unread_count: null }] : undefined));
   runtime.getVersion.mockReset().mockResolvedValue("2.3.4");
 });
+
+const status = (payload: StatusPayload) => act(async () => runtime.statusListener?.({ payload }));
 
 test("status bar shows connection and unread only; version lives in Settings", async () => {
   render(<DesktopApp />);
@@ -98,7 +108,7 @@ test("does not invent data outside the Tauri runtime", () => {
 });
 
 test("local title bar never renders the bottom status bar or requests native unread data", () => {
-  runtime.view = "titlebar";
+  runtime.view = "titlebar-a1";
   render(<DesktopApp />);
   expect(screen.getByRole("banner", { name: "Window title bar" })).toBeTruthy();
   expect(screen.getByRole("navigation", { name: "Window controls" })).toBeTruthy();
@@ -110,27 +120,24 @@ test("local title bar never renders the bottom status bar or requests native unr
 
 test("displays only confirmed unread count and clears it on reset", async () => {
   runtime.invoke.mockImplementation((name) => Promise.resolve(
-    name === "current_status" ? { unread_count: 3 } : undefined,
+    name === "current_status" ? [{ account: "a1", unread_count: 3 }] : undefined,
   ));
   render(<DesktopApp />);
   expect((await screen.findByLabelText("Unread conversations")).textContent).toBe("3");
   expect(runtime.listen).toHaveBeenCalledWith("desktop-status", expect.any(Function));
-  const { act } = await import("@testing-library/react");
-  await act(async () => runtime.statusListener?.({ payload: { unread_count: 5 } }));
+  await status({ account: "a1", unread_count: 5 });
   expect(screen.getByLabelText("Unread conversations").textContent).toBe("5");
-  await act(async () => runtime.statusListener?.({ payload: { unread_count: null } }));
+  await status({ account: "a1", unread_count: null });
   expect(screen.getByLabelText("Unread conversations").textContent).toBe("–");
 });
 
 test("rejects invalid native unread values", async () => {
   render(<DesktopApp />);
-  const { act } = await import("@testing-library/react");
-  await act(async () => runtime.statusListener?.({ payload: { unread_count: -1 } }));
+  await status({ account: "a1", unread_count: -1 });
   expect(screen.getByLabelText("Unread conversations").textContent).toBe("–");
 });
 
 test("reports offline without treating online network as Messenger connectivity", async () => {
-  const { act } = await import("@testing-library/react");
   render(<DesktopApp />);
   expect(screen.getByRole("status", { name: "Connection status" }).textContent).toBe("Status unavailable");
   await act(async () => window.dispatchEvent(new Event("offline")));
@@ -143,22 +150,52 @@ test("removes the native status event listener when the view unmounts", async ()
   const { unmount } = render(<DesktopApp />);
   await waitFor(() => expect(runtime.invoke).toHaveBeenCalledWith("current_status"));
   unmount();
-  // status, download and update subscriptions
-  expect(runtime.unlisten).toHaveBeenCalledTimes(3);
+  // status, account list, download and update subscriptions
+  expect(runtime.unlisten).toHaveBeenCalledTimes(4);
 });
 
 test("connection label follows the verified session, with offline taking priority", async () => {
   render(<DesktopApp />);
-  const { act } = await import("@testing-library/react");
   const label = () => screen.getByRole("status", { name: "Connection status" }).textContent;
   await waitFor(() => expect(runtime.statusListener).toBeTruthy());
-  await act(async () => runtime.statusListener?.({ payload: { unread_count: 0, session: true } }));
+  await status({ account: "a1", unread_count: 0, session: true });
   expect(label()).toBe("Connected");
-  await act(async () => runtime.statusListener?.({ payload: { unread_count: 0, session: false } }));
+  await status({ account: "a1", unread_count: 0, session: false });
   expect(label()).toBe("Signed out");
   await act(async () => window.dispatchEvent(new Event("offline")));
   expect(label()).toBe("Offline");
-  await act(async () => runtime.statusListener?.({ payload: { unread_count: null, session: null } }));
+  await status({ account: "a1", unread_count: null, session: null });
   await act(async () => window.dispatchEvent(new Event("online")));
   expect(label()).toBe("Status unavailable");
+});
+
+test("a split status bar shows each account's own state and ignores unknown accounts", async () => {
+  window.history.pushState({}, "", "/?view=status&accounts=a1%3AHome%2Ca2%3AWork%2520Phone");
+  runtime.invoke.mockImplementation((name) => Promise.resolve(
+    name === "current_status"
+      ? [{ account: "a1", unread_count: 1, session: true }, { account: "a2", unread_count: 4, session: false }]
+      : undefined,
+  ));
+  render(<DesktopApp />);
+  expect((await screen.findByLabelText("Unread conversations: Home")).textContent).toBe("1");
+  expect(screen.getByLabelText("Unread conversations: Work Phone").textContent).toBe("4");
+  expect(screen.getByRole("status", { name: "Connection status: Home" }).textContent).toBe("HomeConnected");
+  expect(screen.getByRole("status", { name: "Connection status: Work Phone" }).textContent).toBe("Work PhoneSigned out");
+  await status({ account: "a2", unread_count: 9, session: true });
+  expect(screen.getByLabelText("Unread conversations: Work Phone").textContent).toBe("9");
+  expect(screen.getByLabelText("Unread conversations: Home").textContent).toBe("1");
+  await status({ account: "a3", unread_count: 7, session: true });
+  expect(screen.queryByLabelText(/a3/)).toBeNull();
+  expect(screen.getByLabelText("Unread conversations: Home").textContent).toBe("1");
+});
+
+test("renaming an account in Settings updates the status segment", async () => {
+  window.history.pushState({}, "", "/?view=status&accounts=a1%3AHome%2Ca2%3AWork");
+  render(<DesktopApp />);
+  await waitFor(() => expect(runtime.accountsListener).toBeTruthy());
+  await act(async () => runtime.accountsListener?.({
+    payload: { accounts: [{ id: "a1", name: "Personal" }, { id: "a2", name: "Work" }] },
+  }));
+  expect(screen.getByLabelText("Unread conversations: Personal")).toBeTruthy();
+  expect(screen.getByLabelText("Unread conversations: Work")).toBeTruthy();
 });

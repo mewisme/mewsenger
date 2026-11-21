@@ -1,3 +1,4 @@
+import { AccountsSection } from "@/ui/accounts-section";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -122,6 +123,7 @@ export function Settings({ version }: { version: string }) {
           </Button>
         </div>
       </section>
+      <AccountsSection />
       <section aria-labelledby="settings-startup">
         <h2 id="settings-startup" className="text-sm font-semibold">Startup</h2>
         <Row
