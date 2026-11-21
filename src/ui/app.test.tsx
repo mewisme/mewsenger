@@ -9,7 +9,7 @@ const runtime = vi.hoisted(() => ({
   getVersion: vi.fn(),
   invoke: vi.fn(),
   listen: vi.fn(),
-  statusListener: undefined as ((event: { payload: { unread_count: number | null } }) => void) | undefined,
+  statusListener: undefined as ((event: { payload: { unread_count: number | null; session?: boolean | null } }) => void) | undefined,
   unlisten: vi.fn(),
   view: "status",
 }));

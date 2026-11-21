@@ -54,6 +54,12 @@ pub(crate) fn show_main(app: &AppHandle) {
     }
 }
 
+/// A WinRT toast created by this app was clicked.
+pub(crate) fn activate_toast(app: &AppHandle, notification_id: i32) {
+    show_main(app);
+    open_notification_thread(app, notification_id);
+}
+
 fn dispatch(app: &AppHandle, id: &str) {
     match id {
         "quit" => app.exit(0),

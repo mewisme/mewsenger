@@ -41,11 +41,21 @@ function createPage({
   }
   NativeNotification.permission = notificationPermission;
   window.Notification = NativeNotification;
+  let composerEl = null;
   const document = {
     readyState: 'complete',
     hidden: false,
     hasFocus: () => focused,
-    querySelectorAll(selector) { return selector === 'a[href*="/t/"]' ? rows.map((r) => r.anchor) : []; },
+    querySelectorAll(selector) {
+      if (selector.startsWith('[contenteditable')) return composerEl ? [composerEl] : [];
+      return selector === 'a[href*="/t/"]' ? rows.map((r) => r.anchor) : [];
+    },
+    execCommand(command, _ui, value) {
+      if (!composerEl) return false;
+      if (command === 'insertText') composerEl.textContent = composerEl.insertWorks === false ? composerEl.textContent : value;
+      if (command === 'delete') composerEl.textContent = '';
+      return true;
+    },
     querySelector(selector) {
       return selector.includes('navigation') ? { available: true } : null;
     },
@@ -59,6 +69,9 @@ function createPage({
     },
     setTimeout(cb) { timers.push(cb); },
     Math, Promise, Reflect,
+    KeyboardEvent: class {
+      constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
+    },
   });
   return {
     events, window, document, location, handlers,
@@ -95,6 +108,13 @@ function createPage({
     refresh() {
       handlers.get('mutation')();
       this.flush();
+    },
+    setComposer(element) { composerEl = element; },
+    async settle() {
+      for (let turn = 0; turn < 400; turn += 1) {
+        while (timers.length) timers.shift()();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
     },
   };
 }

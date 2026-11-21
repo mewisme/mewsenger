@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, EventTarget, Manager, State, Url, Webview};
 use tauri_plugin_notification::NotificationExt;
 
+use crate::toast;
+
 const MAX_TOASTS_PER_MINUTE: usize = 12;
 
 fn with_sound<R: tauri::Runtime>(
@@ -36,6 +38,7 @@ pub struct NotificationState {
     next_toast_id: i32,
     unread: Option<usize>,
     session: Option<bool>,
+    replying: HashMap<String, String>,
 }
 
 impl NotificationState {
@@ -87,6 +90,154 @@ pub fn clicked_thread(app: &AppHandle, id: i32) -> Option<Url> {
     route_for_tap(&mut state, id, Instant::now())
 }
 
+/// Inline reply from a toast stays off until it has been confirmed against a
+/// live Messenger session.
+const QUICK_REPLY: bool = false;
+const REPLY_FAILED_NOTICE: &str = "Reply not sent; open Messenger";
+const MAX_REPLY_CHARS: usize = 2000;
+const MAX_PENDING_REPLIES: usize = 16;
+
+fn toast_tag(id: i32) -> String {
+    format!("toast-{id}")
+}
+
+fn parse_toast_tag(tag: &str) -> Option<i32> {
+    tag.strip_prefix("toast-")?.parse().ok()
+}
+
+/// Action Center group for one conversation; empty when it would not fit.
+fn thread_group(thread: Option<&str>) -> String {
+    thread
+        .map(|thread| format!("thread-{thread}"))
+        .filter(|group| group.chars().count() <= 64)
+        .unwrap_or_default()
+}
+
+/// Trimmed reply text, or `None` when it is empty, too long or has control
+/// characters other than a newline.
+fn validate_reply(text: &str) -> Option<String> {
+    let text = text.trim();
+    let valid = !text.is_empty()
+        && text.chars().count() <= MAX_REPLY_CHARS
+        && text.chars().all(|c| c == '\n' || !c.is_control());
+    valid.then(|| text.to_string())
+}
+
+/// Conversation a still-valid toast belongs to. Does not consume the mapping.
+fn reply_target(state: &NotificationState, id: i32, now: Instant) -> Option<String> {
+    let toast = state.pending.get(&id)?;
+    (now.duration_since(toast.created) < TOAST_LIFETIME).then(|| toast.thread.clone())
+}
+
+fn main_in_background(app: &AppHandle) -> bool {
+    app.get_window("main").is_none_or(|window| {
+        !window.is_visible().unwrap_or(true) || !window.is_focused().unwrap_or(true)
+    })
+}
+
+fn notice(app: &AppHandle, body: &str) {
+    if let Err(error) = with_sound(app.notification().builder())
+        .title("Messenger")
+        .body(body)
+        .show()
+    {
+        eprintln!("could not show notice: {error}");
+    }
+}
+
+/// Shows one desktop toast: through WinRT where available (so it can be
+/// removed per conversation), otherwise through the notification plugin.
+fn deliver(
+    app: &AppHandle,
+    toast_id: i32,
+    group: String,
+    title: String,
+    body: String,
+    reply: bool,
+) -> Result<(), String> {
+    let handler_app = app.clone();
+    let request = toast::ToastRequest {
+        tag: toast_tag(toast_id),
+        group,
+        title: title.clone(),
+        body: body.clone(),
+        reply,
+    };
+    match toast::show(app, request, move |event| {
+        handle_toast_event(&handler_app, event)
+    }) {
+        Ok(()) => return Ok(()),
+        Err(error) if error == "unsupported" => {}
+        Err(error) => eprintln!("WinRT toast unavailable, using plugin: {error}"),
+    }
+    with_sound(app.notification().builder())
+        .id(toast_id)
+        .extra("messenger_fallback", true)
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|error| {
+            eprintln!("could not show desktop notification: {error}");
+            "native notification unavailable".into()
+        })
+}
+
+fn handle_toast_event(app: &AppHandle, event: toast::ToastEvent) {
+    match event {
+        toast::ToastEvent::Opened { tag } => {
+            if let Some(id) = parse_toast_tag(&tag) {
+                crate::desktop::activate_toast(app, id);
+            }
+        }
+        toast::ToastEvent::Reply { tag, text } => quick_reply(app, &tag, &text),
+        toast::ToastEvent::Dismissed { .. } => {}
+    }
+}
+
+fn quick_reply(app: &AppHandle, tag: &str, text: &str) {
+    let (Some(id), Some(text)) = (parse_toast_tag(tag), validate_reply(text)) else {
+        return;
+    };
+    let Some(state) = app.try_state::<Mutex<NotificationState>>() else {
+        return;
+    };
+    let Some(webview) = app.get_webview("messenger") else {
+        return;
+    };
+    if !webview
+        .url()
+        .is_ok_and(|url| trusted(&url, webview.label()))
+    {
+        return;
+    }
+    let nonce = tag.to_string();
+    let thread = {
+        let Ok(mut state) = state.lock() else {
+            return;
+        };
+        let Some(thread) = reply_target(&state, id, Instant::now()) else {
+            return;
+        };
+        if state.replying.len() >= MAX_PENDING_REPLIES {
+            return;
+        }
+        state.replying.insert(nonce.clone(), thread.clone());
+        thread
+    };
+    let payload = serde_json::json!({ "thread": thread, "text": text, "nonce": nonce });
+    let delivered = serde_json::to_string(&payload).ok().is_some_and(|json| {
+        webview
+            .eval(format!("window.__mewQuickReply?.({json});"))
+            .is_ok()
+    });
+    if !delivered {
+        if let Ok(mut state) = state.lock() {
+            state.replying.remove(&nonce);
+        }
+        notice(app, REPLY_FAILED_NOTICE);
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub struct DesktopStatus {
     unread_count: Option<usize>,
@@ -106,14 +257,15 @@ pub fn test_notification(app: AppHandle, webview: Webview) -> Result<(), String>
     if !trusted_status_view(&webview) {
         return Err("local status view required".into());
     }
-    with_sound(app.notification().builder())
-        .title("Messenger notification test")
-        .body("Desktop notification request sent from Messenger.")
-        .show()
-        .map_err(|error| {
-            eprintln!("could not send test notification: {error}");
-            "Windows notification request failed".into()
-        })
+    deliver(
+        &app,
+        0,
+        "test".into(),
+        "Messenger notification test".into(),
+        "Desktop notification request sent from Messenger.".into(),
+        false,
+    )
+    .map_err(|_| "Windows notification request failed".into())
 }
 
 fn publish_status(app: &AppHandle, unread_count: Option<usize>, session: Option<bool>) {
@@ -163,6 +315,11 @@ pub enum MessageEvent {
     },
     Session {
         state: String,
+    },
+    ReplyResult {
+        nonce: String,
+        ok: bool,
+        reason: Option<String>,
     },
     Reset,
 }
@@ -351,16 +508,9 @@ pub fn notification_event(
             let toast_id = notifications.next_toast_id.checked_add(1).unwrap_or(1);
             // Messenger can create its own browser toast. Only the JS fallback
             // reports notifications that require desktop delivery.
-            if let Err(error) = with_sound(app.notification().builder())
-                .id(toast_id)
-                .extra("messenger_fallback", true)
-                .title(title)
-                .body(body)
-                .show()
-            {
-                eprintln!("could not show desktop notification: {error}");
-                return Err("native notification unavailable".into());
-            }
+            let routable = thread_id.as_deref().filter(|t| routable_thread(t));
+            let reply = QUICK_REPLY && routable.is_some() && main_in_background(&app);
+            deliver(&app, toast_id, thread_group(routable), title, body, reply)?;
             notifications.next_toast_id = toast_id;
             notifications.seen.insert(id.clone(), now);
             notifications.rate.push_back(now);
@@ -403,16 +553,18 @@ pub fn notification_event(
                 return Ok(());
             }
             let toast_id = notifications.next_toast_id.checked_add(1).unwrap_or(1);
-            if let Err(error) = with_sound(app.notification().builder())
-                .id(toast_id)
-                .extra("messenger_fallback", true)
-                .title("Messenger")
-                .body("New unread conversation")
-                .show()
-            {
-                eprintln!("could not show unread notification: {error}");
-                return Err("native notification unavailable".into());
-            }
+            deliver(
+                &app,
+                toast_id,
+                thread_group(
+                    Some(&thread_id)
+                        .filter(|t| routable_thread(t))
+                        .map(|t| t.as_str()),
+                ),
+                "Messenger".into(),
+                "New unread conversation".into(),
+                false,
+            )?;
             notifications.next_toast_id = toast_id;
             notifications
                 .seen
@@ -428,15 +580,31 @@ pub fn notification_event(
         }
         MessageEvent::Read { thread_id } => {
             safe_string(&thread_id, 160).ok_or("invalid conversation id")?;
-            // Windows cannot remove the delivered OS toast with this plugin.
-            // Stop routing only this thread's now-stale notifications.
+            // Stop routing this thread's stale notifications and remove its
+            // delivered toasts from Action Center (Windows toasts we created).
             clear_thread(&mut notifications, &thread_id);
+            toast::remove_group(&app, &format!("thread-{thread_id}"));
         }
         MessageEvent::Reset => {
             reset_view_state(&mut notifications);
+            toast::clear_all(&app);
             badge(&app, 0);
             crate::desktop::set_tray_tooltip(&app, 0);
             status_change = true;
+        }
+        MessageEvent::ReplyResult { nonce, ok, reason } => {
+            safe_string(&nonce, 160).ok_or("invalid reply id")?;
+            if let Some(reason) = &reason {
+                safe_string(reason, 40).ok_or("invalid reply reason")?;
+            }
+            if let Some(thread) = notifications.replying.remove(&nonce) {
+                if ok {
+                    clear_thread(&mut notifications, &thread);
+                    toast::remove_group(&app, &format!("thread-{thread}"));
+                } else {
+                    notice(&app, REPLY_FAILED_NOTICE);
+                }
+            }
         }
         MessageEvent::Session { state } => {
             let signed_in = parse_session(&state)?;
@@ -561,6 +729,79 @@ mod tests {
             route_for_tap(&mut state, 5, now).unwrap().as_str(),
             "https://www.messenger.com/t/456"
         );
+    }
+
+    #[test]
+    fn reply_text_is_trimmed_and_bounded() {
+        assert_eq!(validate_reply("  ok \n").as_deref(), Some("ok"));
+        assert_eq!(validate_reply("a\nb").as_deref(), Some("a\nb"));
+        assert!(validate_reply("").is_none());
+        assert!(validate_reply("   \n ").is_none());
+        assert!(validate_reply(&"x".repeat(2000)).is_some());
+        assert!(validate_reply(&"x".repeat(2001)).is_none());
+        assert!(validate_reply("bad\u{0007}bell").is_none());
+        assert!(validate_reply("tab\there").is_none());
+    }
+
+    #[test]
+    fn toast_tags_round_trip_and_reject_other_shapes() {
+        assert_eq!(parse_toast_tag(&toast_tag(17)), Some(17));
+        assert_eq!(parse_toast_tag("toast-x"), None);
+        assert_eq!(parse_toast_tag("17"), None);
+        assert_eq!(parse_toast_tag("thread-17"), None);
+    }
+
+    #[test]
+    fn group_is_per_conversation_and_dropped_when_too_long() {
+        assert_eq!(thread_group(Some("123")), "thread-123");
+        assert_eq!(thread_group(None), "");
+        assert_eq!(thread_group(Some(&"x".repeat(60))), "");
+    }
+
+    #[test]
+    fn page_reports_parse_into_events() {
+        let failed: MessageEvent = serde_json::from_str(
+            r#"{"kind":"reply_result","nonce":"toast-1","ok":false,"reason":"send_failed"}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            failed,
+            MessageEvent::ReplyResult {
+                ok: false,
+                reason: Some(_),
+                ..
+            }
+        ));
+        let done: MessageEvent =
+            serde_json::from_str(r#"{"kind":"reply_result","nonce":"toast-1","ok":true}"#).unwrap();
+        assert!(matches!(
+            done,
+            MessageEvent::ReplyResult {
+                ok: true,
+                reason: None,
+                ..
+            }
+        ));
+        let session: MessageEvent =
+            serde_json::from_str(r#"{"kind":"session","state":"signed_in"}"#).unwrap();
+        assert!(matches!(session, MessageEvent::Session { .. }));
+    }
+
+    #[test]
+    fn reply_only_reaches_a_live_mapped_thread_and_keeps_the_mapping() {
+        let now = Instant::now();
+        let mut state = NotificationState::default();
+        state.pending.insert(
+            3,
+            PendingToast {
+                thread: "123".into(),
+                created: now,
+            },
+        );
+        assert_eq!(reply_target(&state, 3, now).as_deref(), Some("123"));
+        assert_eq!(reply_target(&state, 3, now).as_deref(), Some("123"));
+        assert!(reply_target(&state, 4, now).is_none());
+        assert!(reply_target(&state, 3, now + TOAST_LIFETIME).is_none());
     }
 
     #[test]
