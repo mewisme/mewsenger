@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
@@ -11,10 +12,9 @@ use tauri::{
 };
 
 use crate::accounts::{self, Config};
-use crate::{open_popup, INJECT_SCRIPTS};
+use crate::open_popup;
 
 const HEADER_HEIGHT: f64 = 40.0;
-const FOOTER_HEIGHT: f64 = 36.0;
 const MIN_HEIGHT: f64 = 600.0;
 const MIN_WIDTH: f64 = 800.0;
 const SETTINGS: &str = "settings";
@@ -22,7 +22,7 @@ const SETTINGS: &str = "settings";
 const OFFSCREEN_X: f64 = -30000.0;
 const MENU_WIDTH: f64 = 260.0;
 const MENU_ROW: f64 = 32.0;
-const MENU_PADDING: f64 = 8.0;
+const MENU_PADDING: f64 = 4.0;
 const MENU_SEPARATOR: f64 = 9.0;
 
 pub(crate) fn local_asset_url(url: &Url) -> bool {
@@ -38,7 +38,6 @@ pub(crate) fn local_asset_url(url: &Url) -> bool {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LocalKind {
-    Status,
     Settings,
     Titlebar,
     TabMenu,
@@ -50,9 +49,7 @@ pub(crate) fn local_kind(label: &str) -> Option<LocalKind> {
         accounts::TAB_MENU => Some(LocalKind::TabMenu),
         _ => {
             accounts::account_of(label)?;
-            if label.starts_with("status-") {
-                Some(LocalKind::Status)
-            } else if label.starts_with("titlebar-") {
+            if label.starts_with("titlebar-") {
                 Some(LocalKind::Titlebar)
             } else {
                 None
@@ -64,9 +61,7 @@ pub(crate) fn local_kind(label: &str) -> Option<LocalKind> {
 /// Window that may host a local view: everything but Settings lives in `main`.
 fn owner_ok(label: &str, window_label: &str) -> bool {
     match local_kind(label) {
-        Some(LocalKind::Status | LocalKind::Titlebar | LocalKind::TabMenu) => {
-            window_label == "main"
-        }
+        Some(LocalKind::Titlebar | LocalKind::TabMenu) => window_label == "main",
         Some(LocalKind::Settings) => true,
         None => false,
     }
@@ -79,8 +74,9 @@ pub(crate) fn local_webview(webview: &tauri::Webview, kinds: &[LocalKind]) -> bo
         && webview.url().is_ok_and(|url| local_asset_url(&url))
 }
 
-/// Sends an event to every status webview.
-pub(crate) fn emit_status<R: tauri::Runtime, S: Serialize + Clone>(
+/// Sends an event to the title bar, which hosts the settings, update and
+/// download controls.
+pub(crate) fn emit_chrome<R: tauri::Runtime, S: Serialize + Clone>(
     app: &AppHandle<R>,
     event: &str,
     payload: S,
@@ -88,7 +84,7 @@ pub(crate) fn emit_status<R: tauri::Runtime, S: Serialize + Clone>(
     let _ = app.emit_filter(
         event,
         payload,
-        |target| matches!(target, EventTarget::Webview { label } if label.starts_with("status-")),
+        |target| matches!(target, EventTarget::Webview { label } if label.starts_with("titlebar-")),
     );
 }
 
@@ -101,10 +97,10 @@ fn bounds(window: &Window) -> tauri::Result<(f64, f64)> {
     ))
 }
 
-fn vertical_bounds(height: f64, has_titlebar: bool, has_footer: bool) -> (f64, f64) {
+/// Top and bottom of the page area: everything below the title bar.
+fn vertical_bounds(height: f64, has_titlebar: bool) -> (f64, f64) {
     let header = if has_titlebar { HEADER_HEIGHT } else { 0.0 };
-    let footer = if has_footer { FOOTER_HEIGHT } else { 0.0 };
-    (header, (height - footer).max(header + 1.0))
+    (header, height.max(header + 1.0))
 }
 
 fn is_remote(label: &str) -> bool {
@@ -124,9 +120,6 @@ pub fn resize(window: &Window) -> tauri::Result<()> {
         views
             .iter()
             .any(|v| local_kind(v.label()) == Some(LocalKind::Titlebar)),
-        views
-            .iter()
-            .any(|v| local_kind(v.label()) == Some(LocalKind::Status)),
     );
     let body_height = body_bottom - header;
     let shown = accounts::remote_label(&accounts::snapshot(&window.app_handle().clone()).active);
@@ -147,10 +140,6 @@ pub fn resize(window: &Window) -> tauri::Result<()> {
                 webview.set_position(LogicalPosition::new(0.0, 0.0))?;
                 webview.set_size(LogicalSize::new(width, HEADER_HEIGHT))?;
             }
-            Some(LocalKind::Status) => {
-                webview.set_position(LogicalPosition::new(0.0, body_bottom))?;
-                webview.set_size(LogicalSize::new(width, (height - body_bottom).max(1.0)))?;
-            }
             Some(LocalKind::Settings) => {
                 webview.set_position(LogicalPosition::new(0.0, header))?;
                 webview.set_size(LogicalSize::new(width, body_height))?;
@@ -161,19 +150,69 @@ pub fn resize(window: &Window) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Asks WebView2 to trim memory of pages that are not shown. The page keeps
+/// running, so its notifications still arrive.
+#[cfg(windows)]
+fn set_memory_target(webview: &tauri::Webview, low: bool) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+    };
+    use windows::core::Interface;
+    let level = if low {
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+    } else {
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+    };
+    let _ = webview.with_webview(move |platform| unsafe {
+        if let Ok(core) = platform.controller().CoreWebView2() {
+            if let Ok(core) = core.cast::<ICoreWebView2_19>() {
+                let _ = core.SetMemoryUsageTargetLevel(level);
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn set_memory_target(_webview: &tauri::Webview, _low: bool) {}
+
 pub fn should_show_on_start(start_hidden: bool, tray_available: bool) -> bool {
     !start_hidden || !tray_available
 }
+
+/// Facebook leaves a 1px absolutely positioned helper at the bottom edge of
+/// the page, so the document scrolls by one pixel and WebView2 draws a full
+/// scrollbar down the right side. Document scrolling stays; only its bar is
+/// hidden (the app scrolls inside its own containers).
+const PAGE_STYLE_SCRIPT: &str = "(() => {\
+const add = () => {\
+  if (!document.documentElement) return false;\
+  const style = document.createElement('style');\
+  style.textContent = 'html{scrollbar-width:none}';\
+  (document.head || document.documentElement).appendChild(style);\
+  return true;\
+};\
+if (!add()) {\
+  new MutationObserver((_, observer) => { if (add()) observer.disconnect(); })\
+    .observe(document, { childList: true });\
+}\
+})();";
 
 fn remote_builder(app: &AppHandle, account: &str) -> WebviewBuilder<tauri::Wry> {
     let url = crate::site::current().start_url().clone();
     let navigation_app = app.clone();
     let popup_app = app.clone();
+    let page_app = app.clone();
     let builder = WebviewBuilder::new(accounts::remote_label(account), WebviewUrl::External(url))
-        .initialization_script(crate::site::current().prelude());
-    let builder = INJECT_SCRIPTS
-        .iter()
-        .fold(builder, |builder, script| builder.initialization_script(*script))
+        .initialization_script(crate::site::current().prelude())
+        .initialization_script(crate::prefs::page_script(&crate::prefs::current(app)))
+        .initialization_script(crate::INJECT_SCRIPT)
+        // The creation-time choices go stale once a setting changes; a reload
+        // runs that script again, so hand the page the current ones.
+        .on_page_load(move |webview, _| {
+            let _ = webview.eval(crate::prefs::page_script(&crate::prefs::current(&page_app)));
+        })
+        .initialization_script(PAGE_STYLE_SCRIPT)
         .on_navigation(move |url| crate::links::allow_navigation(&navigation_app, url))
         .on_new_window(move |url, features| open_popup(&popup_app, url, features))
         .on_download(crate::downloads::handler(app.clone()));
@@ -209,25 +248,11 @@ fn add_titlebar(window: &Window, config: &Config, width: f64) -> tauri::Result<(
     Ok(())
 }
 
-fn add_status(window: &Window, width: f64, height: f64) -> tauri::Result<()> {
-    let footer = window.add_child(
-        local_builder(accounts::status_label(accounts::FIRST), "view=status"),
-        LogicalPosition::new(0.0, (height - FOOTER_HEIGHT).max(1.0)),
-        LogicalSize::new(width, FOOTER_HEIGHT),
-    );
-    if let Err(error) = footer {
-        // The remote WebView stays usable if the optional footer fails.
-        eprintln!("could not initialize local status: {error}");
-    }
-    Ok(())
-}
-
-/// Title bar and status footer of the main window.
+/// Title bar of the main window.
 fn mount_chrome(window: &Window, config: &Config, show: bool) -> tauri::Result<()> {
     window.set_min_size(Some(LogicalSize::new(MIN_WIDTH, MIN_HEIGHT)))?;
-    let (width, height) = bounds(window)?;
+    let (width, _) = bounds(window)?;
     add_titlebar(window, config, width)?;
-    add_status(window, width, height)?;
     resize(window)?;
     if show {
         window.show()?;
@@ -273,6 +298,7 @@ fn reconcile(app: &AppHandle) -> tauri::Result<()> {
         .iter()
         .filter(|id| main.get_webview(&accounts::remote_label(id)).is_none())
         .collect::<Vec<_>>();
+    forget_low(&missing);
     // Pages added later sit above older views, so Settings drawn over the
     // page is rebuilt on top of them.
     let overlay = !missing.is_empty() && settings_overlay(&main).is_some();
@@ -283,7 +309,7 @@ fn reconcile(app: &AppHandle) -> tauri::Result<()> {
         wait_until(|| settings_overlay(&main).is_none());
     }
     let (width, height) = bounds(&main)?;
-    let (header, body_bottom) = vertical_bounds(height, true, true);
+    let (header, body_bottom) = vertical_bounds(height, true);
     for id in missing {
         main.add_child(
             remote_builder(app, id),
@@ -300,6 +326,7 @@ fn reconcile(app: &AppHandle) -> tauri::Result<()> {
             let _ = webview.set_focus();
         }
     }
+    apply_memory_levels(app);
     Ok(())
 }
 
@@ -316,8 +343,114 @@ pub fn sync_tabs(app: &AppHandle, after: impl FnOnce() + Send + 'static) {
     });
 }
 
+/// A tab unused this long (or the whole window, when minimized or in the
+/// background) is asked to give memory back. Pages keep running.
+const TRIM_AFTER: Duration = Duration::from_secs(5 * 60);
+const TRIM_CHECK_EVERY: Duration = Duration::from_secs(5);
+
+#[derive(Default)]
+struct TrimState {
+    /// When each tab was last the shown one.
+    last_shown: HashMap<String, Instant>,
+    /// Since when the main window is minimized, hidden or not focused.
+    inactive_since: Option<Instant>,
+    /// Tabs currently at the low memory target.
+    low: HashSet<String>,
+}
+
+static TRIM: Mutex<Option<TrimState>> = Mutex::new(None);
+
+/// Tabs that should be at the low memory target: background tabs unused for
+/// `after`, or every tab once the window has been idle for `after`.
+fn low_memory_tabs(
+    open: &[String],
+    shown: &str,
+    last_shown: &mut HashMap<String, Instant>,
+    window_idle: Option<Duration>,
+    now: Instant,
+    after: Duration,
+) -> HashSet<String> {
+    last_shown.insert(shown.to_string(), now);
+    if window_idle.is_some_and(|idle| idle >= after) {
+        return open.iter().cloned().collect();
+    }
+    open.iter()
+        .filter(|id| id.as_str() != shown)
+        .filter(|id| now.duration_since(*last_shown.entry((*id).clone()).or_insert(now)) >= after)
+        .cloned()
+        .collect()
+}
+
+/// Moves tabs between the normal and low memory target as their situation
+/// changed since the last call.
+fn apply_memory_levels(app: &AppHandle) {
+    let config = accounts::snapshot(app);
+    let enabled = crate::prefs::current(app).trim_idle_memory;
+    let window_inactive = app.get_window("main").is_some_and(|main| {
+        !main.is_visible().unwrap_or(true)
+            || main.is_minimized().unwrap_or(false)
+            || !main.is_focused().unwrap_or(true)
+    });
+    let now = Instant::now();
+    let (to_low, to_normal) = {
+        let mut guard = TRIM.lock().unwrap_or_else(|e| e.into_inner());
+        let state = guard.get_or_insert_with(TrimState::default);
+        state.last_shown.retain(|id, _| config.is_open(id));
+        match (window_inactive, state.inactive_since) {
+            (true, None) => state.inactive_since = Some(now),
+            (false, _) => state.inactive_since = None,
+            _ => {}
+        }
+        let wanted = if enabled {
+            low_memory_tabs(
+                &config.open,
+                config.shown_account(),
+                &mut state.last_shown,
+                state.inactive_since.map(|since| now.duration_since(since)),
+                now,
+                TRIM_AFTER,
+            )
+        } else {
+            HashSet::new()
+        };
+        let to_low = wanted.difference(&state.low).cloned().collect::<Vec<_>>();
+        let to_normal = state.low.difference(&wanted).cloned().collect::<Vec<_>>();
+        state.low = wanted;
+        (to_low, to_normal)
+    };
+    for (ids, low) in [(to_low, true), (to_normal, false)] {
+        for id in ids {
+            if let Some(webview) = app.get_webview(&accounts::remote_label(&id)) {
+                set_memory_target(&webview, low);
+            }
+        }
+    }
+}
+
+/// A page created after the last check starts at the normal target.
+fn forget_low(ids: &[&String]) {
+    let mut guard = TRIM.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(state) = guard.as_mut() {
+        for id in ids {
+            state.low.remove(id.as_str());
+        }
+    }
+}
+
+fn start_memory_trimmer(app: &AppHandle) {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    let app = app.clone();
+    STARTED.call_once(move || {
+        std::thread::spawn(move || loop {
+            std::thread::sleep(TRIM_CHECK_EVERY);
+            apply_memory_levels(&app);
+        });
+    });
+}
+
 /// Creates the title bar, footer and open tabs. Runs on a worker.
 pub fn apply_layout(app: &AppHandle, show_main: bool) {
+    start_memory_trimmer(app);
     let app = app.clone();
     std::thread::spawn(move || {
         let _serial = TABS_LOCK.lock();
@@ -405,7 +538,9 @@ pub fn toggle_tab_menu(app: &AppHandle, x: f64) {
         let result = bounds(&main).and_then(|(width, _)| {
             let left = x.clamp(0.0, (width - MENU_WIDTH).max(0.0));
             main.add_child(
-                local_builder(accounts::TAB_MENU.to_string(), &query),
+                // Transparent, so the part of the view the menu card does not
+                // fill (and its shadow) shows the page beneath instead of black.
+                local_builder(accounts::TAB_MENU.to_string(), &query).transparent(true),
                 LogicalPosition::new(left, HEADER_HEIGHT),
                 LogicalSize::new(MENU_WIDTH, tab_menu_height(closed.len())),
             )
@@ -446,8 +581,8 @@ fn settings_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 #[tauri::command]
 pub fn show_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
-    if !local_webview(&webview, &[LocalKind::Status]) {
-        return Err("local status view required".into());
+    if !local_webview(&webview, &[LocalKind::Titlebar]) {
+        return Err("title bar required".into());
     }
     open_settings(&app);
     Ok(())
@@ -515,7 +650,7 @@ fn add_settings_overlay(window: &Window) -> tauri::Result<()> {
     window.add_child(
         local_builder(SETTINGS.to_string(), "view=settings&overlay=1"),
         LogicalPosition::new(0.0, HEADER_HEIGHT),
-        LogicalSize::new(width, (height - HEADER_HEIGHT - FOOTER_HEIGHT).max(1.0)),
+        LogicalSize::new(width, (height - HEADER_HEIGHT).max(1.0)),
     )?;
     resize(window)
 }
@@ -563,6 +698,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn trims_idle_background_tabs_but_never_a_lone_shown_tab() {
+        let open = ["a1", "a2", "a3"].map(String::from).to_vec();
+        let start = Instant::now();
+        let after = Duration::from_secs(300);
+        let mut last = HashMap::new();
+        assert!(low_memory_tabs(&open, "a1", &mut last, None, start, after).is_empty());
+        // a2 was shown again at 200s, so only a3 has been idle for 300s.
+        last.insert("a2".to_string(), start + Duration::from_secs(200));
+        let later = start + Duration::from_secs(300);
+        let low = low_memory_tabs(&open, "a1", &mut last, None, later, after);
+        assert_eq!(low, HashSet::from(["a3".to_string()]));
+        // One tab: nothing to trim while the window is in use.
+        let one = ["a1".to_string()];
+        let far = start + Duration::from_secs(900);
+        assert!(low_memory_tabs(&one, "a1", &mut last, None, far, after).is_empty());
+    }
+
+    #[test]
+    fn an_idle_window_trims_every_tab_including_the_shown_one() {
+        let open = ["a1", "a2"].map(String::from).to_vec();
+        let now = Instant::now();
+        let after = Duration::from_secs(300);
+        let mut last = HashMap::new();
+        let short = Some(Duration::from_secs(299));
+        assert!(low_memory_tabs(&open, "a1", &mut last, short, now, after).is_empty());
+        let long = Some(Duration::from_secs(300));
+        assert_eq!(low_memory_tabs(&open, "a1", &mut last, long, now, after).len(), 2);
+    }
+
+    #[test]
     fn hidden_start_needs_a_tray_to_stay_reachable() {
         assert!(should_show_on_start(false, false));
         assert!(should_show_on_start(false, true));
@@ -573,27 +738,20 @@ mod tests {
     #[test]
     fn bounded_header_and_footer() {
         assert_eq!(HEADER_HEIGHT, 40.0);
-        assert_eq!(FOOTER_HEIGHT, 36.0);
-        assert_eq!(600.0 - HEADER_HEIGHT - FOOTER_HEIGHT, 524.0);
-        assert_eq!((20.0_f64 - FOOTER_HEIGHT).max(1.0), 1.0);
-        assert_eq!(vertical_bounds(600.0, true, true), (40.0, 564.0));
-        assert_eq!(vertical_bounds(600.0, false, true), (0.0, 564.0));
-        assert_eq!(vertical_bounds(600.0, true, false), (40.0, 600.0));
-        assert_eq!(vertical_bounds(600.0, false, false), (0.0, 600.0));
+        assert_eq!(vertical_bounds(600.0, true), (40.0, 600.0));
+        assert_eq!(vertical_bounds(600.0, false), (0.0, 600.0));
+        assert_eq!(vertical_bounds(10.0, true), (40.0, 41.0));
     }
 
     #[test]
     fn local_kinds_come_from_the_label_alone() {
-        assert_eq!(local_kind("status-a1"), Some(LocalKind::Status));
         assert_eq!(local_kind("titlebar-a1"), Some(LocalKind::Titlebar));
         assert_eq!(local_kind("settings"), Some(LocalKind::Settings));
         assert_eq!(local_kind("tabmenu"), Some(LocalKind::TabMenu));
         for other in [
-            "status",
+            "status-a1",
             "titlebar",
             "messenger-a1",
-            "status-a1x",
-            "status-../x",
             "split",
             "main",
             "popup-1",
@@ -605,11 +763,9 @@ mod tests {
 
     #[test]
     fn local_views_only_work_inside_the_main_window() {
-        assert!(owner_ok("status-a1", "main"));
         assert!(owner_ok("titlebar-a1", "main"));
         assert!(owner_ok("tabmenu", "main"));
         assert!(!owner_ok("tabmenu", "settings"));
-        assert!(!owner_ok("status-a1", "settings"));
         assert!(!owner_ok("titlebar-a1", "popup-1"));
         assert!(owner_ok("settings", "settings"));
         assert!(owner_ok("settings", "main"));
@@ -618,8 +774,8 @@ mod tests {
 
     #[test]
     fn the_dropdown_has_a_row_per_closed_account_plus_the_sign_in_row() {
-        assert_eq!(tab_menu_height(0), 16.0 + 32.0);
-        assert_eq!(tab_menu_height(2), 16.0 + 3.0 * 32.0 + 9.0);
+        assert_eq!(tab_menu_height(0), 8.0 + 32.0);
+        assert_eq!(tab_menu_height(2), 8.0 + 3.0 * 32.0 + 9.0);
     }
 
     #[test]

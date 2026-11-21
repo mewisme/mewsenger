@@ -27,7 +27,7 @@ pub fn get_diagnostics(
     update: State<'_, Mutex<UpdateState>>,
 ) -> Result<Diagnostics, String> {
     use crate::shell::LocalKind;
-    if !crate::shell::local_webview(&webview, &[LocalKind::Status, LocalKind::Settings]) {
+    if !crate::shell::local_webview(&webview, &[LocalKind::Settings]) {
         return Err("local view required".into());
     }
     let (session, unread_known) = notifications

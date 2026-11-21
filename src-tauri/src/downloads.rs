@@ -52,7 +52,7 @@ fn finished(state: &mut DownloadState, path: Option<PathBuf>, success: bool) -> 
 }
 
 fn publish<R: Runtime>(app: &AppHandle<R>, status: &DownloadStatus) {
-    crate::shell::emit_status(app, "download-status", status);
+    crate::shell::emit_chrome(app, "download-status", status);
 }
 
 /// Shared download policy: allow the download to the default location and tell
@@ -87,8 +87,8 @@ pub fn reveal_last_download(
     webview: Webview,
     state: tauri::State<'_, Mutex<DownloadState>>,
 ) -> Result<(), String> {
-    if !crate::shell::local_webview(&webview, &[crate::shell::LocalKind::Status]) {
-        return Err("local status view required".into());
+    if !crate::shell::local_webview(&webview, &[crate::shell::LocalKind::Titlebar]) {
+        return Err("title bar required".into());
     }
     let path = state
         .lock()

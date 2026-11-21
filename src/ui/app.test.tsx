@@ -10,7 +10,7 @@ const runtime = vi.hoisted(() => ({
   invoke: vi.fn(),
   listen: vi.fn(),
   unlisten: vi.fn(),
-  view: "status",
+  view: "titlebar-a1",
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -48,41 +48,27 @@ afterEach(() => {
 });
 beforeEach(() => {
   runtime.available = true;
-  runtime.view = "status";
+  runtime.view = "titlebar-a1";
   runtime.unlisten.mockReset();
   runtime.listen.mockReset().mockImplementation(() => Promise.resolve(runtime.unlisten));
   runtime.invoke.mockReset().mockResolvedValue(undefined);
   runtime.getVersion.mockReset().mockResolvedValue("2.3.4");
 });
 
-test("status bar holds only the right-hand controls; version lives in Settings", async () => {
+test("an unknown webview label falls back to the title bar; version lives in Settings", () => {
+  runtime.view = "whatever";
   render(<DesktopApp />);
-  expect(screen.getByRole("contentinfo", { name: "Application status" })).toBeTruthy();
-  expect(screen.queryByRole("status")).toBeNull();
-  expect(screen.queryByLabelText(/Unread conversations/)).toBeNull();
+  expect(screen.getByRole("banner", { name: "Window title bar" })).toBeTruthy();
+  expect(screen.queryByRole("contentinfo")).toBeNull();
   expect(screen.queryByLabelText("Application version")).toBeNull();
   expect(runtime.getVersion).not.toHaveBeenCalled();
-  expect(runtime.invoke).not.toHaveBeenCalledWith("current_status");
-});
-
-test("the update control stays hidden while updates are not configured", async () => {
-  render(<DesktopApp />);
-  await waitFor(() => expect(runtime.invoke).toHaveBeenCalledWith("get_update_state"));
-  expect(screen.queryByRole("button", { name: "Updates" })).toBeNull();
-});
-
-test("the gear opens settings", async () => {
-  const user = userEvent.setup();
-  render(<DesktopApp />);
-  await user.click(screen.getByRole("button", { name: "Settings" }));
-  expect(runtime.invoke).toHaveBeenCalledWith("show_settings");
 });
 
 test("the settings window reads the installed version and has no close button of its own", async () => {
   runtime.view = "settings";
   render(<DesktopApp />);
   expect(await screen.findByText(/Version 2\.3\.4/)).toBeTruthy();
-  expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
+  expect(screen.queryByRole("banner")).toBeNull();
   expect(screen.queryByRole("button", { name: "Close settings" })).toBeNull();
 });
 
@@ -99,7 +85,9 @@ test("does not invent data outside the Tauri runtime", () => {
   runtime.available = false;
   render(<DesktopApp />);
   expect(runtime.getVersion).not.toHaveBeenCalled();
-  expect(runtime.listen).not.toHaveBeenCalled();
+  expect(runtime.invoke).not.toHaveBeenCalled();
+  expect(runtime.listen).not.toHaveBeenCalledWith("download-status", expect.anything());
+  expect(runtime.listen).not.toHaveBeenCalledWith("update-status", expect.anything());
 });
 
 test("title bar without parameters still renders one tab and the window controls", () => {
@@ -107,10 +95,9 @@ test("title bar without parameters still renders one tab and the window controls
   render(<DesktopApp />);
   expect(screen.getByRole("banner", { name: "Window title bar" })).toBeTruthy();
   expect(screen.getByRole("navigation", { name: "Window controls" })).toBeTruthy();
-  expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
-  expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"))).toEqual(["Account 1"]);
+  expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"))).toEqual(["Sign in"]);
   expect(screen.queryByRole("button", { name: /^Close tab/ })).toBeNull();
-  expect(runtime.invoke).not.toHaveBeenCalled();
+  expect(runtime.invoke).not.toHaveBeenCalledWith("open_account", expect.anything());
 });
 
 const TABS_URL = "/?view=titlebar&accounts=a1%3AHome%2Ca2%3AWork%2Ca3%3ASpare&open=a1,a2&active=a2";
@@ -124,6 +111,7 @@ function openTitleBar(url = TABS_URL) {
     return Promise.resolve(runtime.unlisten);
   });
   render(<DesktopApp />);
+  runtime.invoke.mockClear();
   return { announce: (payload: unknown) => act(async () => announce?.({ payload })) };
 }
 
@@ -148,7 +136,7 @@ test("closing a tab goes through close_tab without switching to it; one tab has 
   expect(runtime.invoke).toHaveBeenCalledWith("close_tab", { id: "a2" });
   runtime.invoke.mockClear();
   await announce({
-    accounts: [{ id: "a1", name: "Home" }, { id: "a2", name: "Work" }],
+    accounts: [{ id: "a1", display_name: "Home" }, { id: "a2", display_name: "Work" }],
     open: ["a2"],
     active: "a2",
   });
@@ -176,7 +164,7 @@ test("tabs follow account changes announced by the backend and ignore malformed 
   await announce(null);
   expect(screen.getAllByRole("tab").length).toBe(2);
   await announce({
-    accounts: [{ id: "a1", name: "Home" }, { id: "a2", name: "Phone" }, { id: "a3", name: "Spare" }],
+    accounts: [{ id: "a1", display_name: "Home" }, { id: "a2", display_name: "Phone" }, { id: "a3", display_name: "Spare" }],
     open: ["a1", "a2", "a3"],
     active: "a3",
   });
@@ -186,18 +174,18 @@ test("tabs follow account changes announced by the backend and ignore malformed 
   expect(screen.queryByRole("tab", { name: "Work" })).toBeNull();
 });
 
-test("the tab menu view renders the dropdown without a status bar", () => {
+test("the tab menu view renders the dropdown only", () => {
   runtime.view = "tabmenu";
   window.history.pushState({}, "", "/?view=tabmenu&accounts=a2%3AWork&next=3");
   render(<DesktopApp />);
   expect(screen.getByRole("menu")).toBeTruthy();
   expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["WWork", "Sign in to a new account"]);
-  expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
+  expect(screen.queryByRole("banner")).toBeNull();
 });
 
-test("removes the download and update subscriptions when the status view unmounts", async () => {
+test("removes every title bar subscription when it unmounts", async () => {
   const { unmount } = render(<DesktopApp />);
   await waitFor(() => expect(runtime.invoke).toHaveBeenCalledWith("get_update_state"));
   unmount();
-  expect(runtime.unlisten).toHaveBeenCalledTimes(2);
+  expect(runtime.unlisten).toHaveBeenCalledTimes(5);
 });

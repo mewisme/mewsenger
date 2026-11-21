@@ -6,12 +6,24 @@ import { Button } from "@/components/ui/button";
 import appIcon from "../../src-tauri/icons/32x32.png";
 import { AccountTabs } from "@/ui/account-tabs";
 import type { TabsView } from "@/ui/local-view";
+import { TitleActions } from "@/ui/title-actions";
 
 export function TitleBar({ tabs = null }: { tabs?: TabsView | null }) {
   const window = useMemo(() => isTauri() ? getCurrentWindow() : null, []);
   const native = window !== null;
   const [maximized, setMaximized] = useState(false);
   const [controlError, setControlError] = useState("");
+
+  useEffect(() => {
+    const { body, documentElement } = document;
+    const previous = [body.style.overflow, documentElement.style.overflow];
+    body.style.overflow = "hidden";
+    documentElement.style.overflow = "hidden";
+    return () => {
+      body.style.overflow = previous[0];
+      documentElement.style.overflow = previous[1];
+    };
+  }, []);
 
   useEffect(() => {
     if (!window) return;
@@ -46,7 +58,7 @@ export function TitleBar({ tabs = null }: { tabs?: TabsView | null }) {
 
   return (
     <header aria-label="Window title bar"
-      className={`flex h-10 w-full select-none items-end border-b border-border text-foreground ${tabs ? "bg-muted/50" : "bg-background"}`}>
+      className={`flex h-10 w-full select-none items-end overflow-hidden border-b border-border text-foreground ${tabs ? "bg-muted/50" : "bg-background"}`}>
       <div aria-label="Drag Messenger window"
         className={`flex h-full cursor-default items-center gap-2 ${tabs ? "shrink-0 pl-3 pr-1" : "min-w-0 flex-1 px-3"}`}
         onMouseDown={drag}
@@ -62,6 +74,7 @@ export function TitleBar({ tabs = null }: { tabs?: TabsView | null }) {
             onDoubleClick={toggleMaximize} />
         </>
       )}
+      <TitleActions />
       <nav aria-label="Window controls" className="flex h-full shrink-0 items-stretch">
         <Button type="button" size="icon" variant="ghost" disabled={!native}
           aria-label="Minimize window" title="Minimize"

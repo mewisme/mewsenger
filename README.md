@@ -8,11 +8,11 @@ Messenger is a native desktop application that wraps the Messenger web interface
 
 ## Local desktop shell
 
-The main native window contains three separate WebViews: a **custom 40px title bar at the top** with drag and Minimize / Maximize / Restore / Close controls, Messenger at `https://www.messenger.com` in the center, and a **36px status bar at the bottom**. The title bar and status bar load local React/shadcn components from separate app URLs. Messenger is not embedded in an iframe or proxied through the local frontend. Only the main window is frameless; call popups and the Settings window keep native window chrome. If the title bar fails, native decorations are restored; if the optional footer fails, Messenger uses the remaining space.
+The main native window contains separate WebViews: a **custom 40px title bar at the top** with the account tabs, Settings, update and download buttons and Minimize / Maximize / Restore / Close controls, and one Messenger page (`https://www.messenger.com`) per open tab below it. The title bar loads a local React/shadcn component from its own app URL. Messenger is not embedded in an iframe or proxied through the local frontend. Only the main window is frameless; call popups and the Settings window keep native window chrome. If the title bar fails, native decorations are restored.
 
-The footer is deliberately minimal: a download indicator and update button when relevant, and a Settings button. Settings also shows the bundled Messenger icon, the installed version and credits. The custom title bar also uses the icon from `src-tauri/icons/`. The app follows the system light/dark appearance.
+The title bar keeps a download indicator and an update button when relevant, and a Settings button. Settings also shows the bundled Messenger icon, the installed version and credits. The custom title bar also uses the icon from `src-tauri/icons/`. The app follows the system light/dark appearance.
 
-The unread badge is updated only from recognized Messenger unread markers; missing markers remain unknown rather than being reported as zero. The footer displays **Offline** when the local browser reports no network, **Connected** or **Signed out** when the page positively shows a signed-in chat list or a login screen, and **Status unavailable** otherwise: an online network alone does not prove the Messenger session is connected. The update button appears only when a signed update source is built in. A download indicator appears after a file download starts and, once finished, reveals the file in Explorer. The version, credits and the test-notification button live in **Settings**.
+The unread badge is updated only from recognized Messenger unread markers; missing markers remain unknown rather than being reported as zero. The update button appears only when a signed update source is built in. A download indicator appears after a file download starts and, once finished, reveals the file in Explorer. The version, credits and the test-notification button live in **Settings**.
 
 Clicking a visible native fallback toast brings Messenger to the foreground and opens its conversation only when the notification plugin supplies a still-valid matching ID and Messenger supplied a safely routable conversation ID. Unrecognized, expired, or already-read notifications only reveal Messenger. The plugin cannot guarantee activation from Windows Action Center or remove delivered Windows toast history.
 
@@ -57,9 +57,9 @@ Run up to four Messenger accounts at once.
 
 ## Settings, startup and updates
 
-- **Settings** opens from the tray menu (**Settings…**) or the gear in the status bar. It holds the message-preview switch (shared with the tray check item), **Launch Messenger when I sign in to Windows**, the update control and **Copy diagnostics**. Preferences are stored in `preferences.json` in the app config directory; launch at login is read from and written to the operating system, never stored by the app.
+- **Settings** opens from the tray menu (**Settings…**) or the gear in the title bar. It holds the message-preview switch (shared with the tray check item), **Launch Messenger when I sign in to Windows**, the update control and **Copy diagnostics**. Preferences are stored in `preferences.json` in the app config directory; launch at login is read from and written to the operating system, never stored by the app.
 - **Launch at login** is off by default. When enabled the app starts with `--minimized`: the window stays hidden and the tray icon is used (if the tray is unavailable the window is shown so the app is never invisible). A second launch does not start another copy; it shows the running window.
-- **Updates:** the status bar and Settings show *Updates are not configured* until a signed update source is built in. Release builds merge `src-tauri/tauri.release.conf.json`, which holds the public key and the `latest.json` endpoint on GitHub Releases. The portable executable cannot replace itself, so its update action opens the releases page instead. The status bar never shows a download percentage because none is available.
+- **Updates:** Settings shows *Updates are not configured* until a signed update source is built in. Release builds merge `src-tauri/tauri.release.conf.json`, which holds the public key and the `latest.json` endpoint on GitHub Releases. The portable executable cannot replace itself, so its update action opens the releases page instead. The status bar never shows a download percentage because none is available.
 - **Diagnostics** copy only versions (app, Tauri, WebView2), OS and architecture, update state, whether the session and unread count are known. No paths, URLs, messages or account data.
 
 ## Portable and release builds
@@ -70,7 +70,7 @@ Run up to four Messenger accounts at once.
 ## Known limitations
 
 - **No upload progress.** WebView2 offers no official upload callback and wrapping `fetch`/`XMLHttpRequest` would touch Messenger request bodies, which the app avoids.
-- **No download percentage.** Tauri reports only that a download started and finished; the status bar shows the file name and a final state.
+- **No download percentage.** Tauri reports only that a download started and finished; the title bar button shows the file name and a final state.
 - **Toast removal** works only for toasts created by this app through Windows' own notification API. Toasts shown by the plugin fallback cannot be removed individually. Quick reply from a toast is implemented but disabled until it has been verified against a live session.
 - **Hide typing indicator, conversation preloading, Messenger preferences and call permissions** depend on probes of a live session. All rows are currently `untested`, so none of these features exist yet.
 - The app's own windows follow the operating system theme; whether Messenger's page follows it is untested, and the app has no separate theme switch.

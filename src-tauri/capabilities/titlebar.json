@@ -1,6 +1,6 @@
 {
   "identifier": "titlebar",
-  "description": "Local window chrome controls only",
+  "description": "Local title bar: window controls, tabs, settings, update and download controls",
   "webviews": [
     "titlebar-*"
   ],
@@ -15,10 +15,16 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-open-account",
+    "allow-list-accounts",
     "allow-add-account",
     "allow-close-tab",
     "allow-open-tab-menu",
     "allow-move-tab",
-    "allow-tab-shortcut"
+    "allow-tab-shortcut",
+    "allow-show-settings",
+    "allow-reveal-last-download",
+    "allow-get-update-state",
+    "allow-check-update",
+    "allow-install-update"
   ]
 }

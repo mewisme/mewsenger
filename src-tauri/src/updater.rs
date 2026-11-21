@@ -86,7 +86,7 @@ fn transition(app: &AppHandle, state: &Mutex<UpdateState>, result: UpdateResult)
             message: CHECK_FAILED.into(),
         },
     };
-    crate::shell::emit_status(app, "update-status", &next);
+    crate::shell::emit_chrome(app, "update-status", &next);
     let _ = app.emit_to("settings", "update-status", &next);
     next
 }
@@ -95,7 +95,7 @@ fn allowed(webview: &Webview) -> Result<(), String> {
     if crate::shell::local_webview(
         webview,
         &[
-            crate::shell::LocalKind::Status,
+            crate::shell::LocalKind::Titlebar,
             crate::shell::LocalKind::Settings,
         ],
     ) {
