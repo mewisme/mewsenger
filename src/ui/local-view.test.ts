@@ -2,10 +2,9 @@ import { expect, test } from "vitest";
 import { parseAccounts, parseOverlay, parseTabMenu, parseTabs, resolveLocalView } from "./local-view";
 
 test("routes local assets by their explicit URL rather than potentially shared runtime metadata", () => {
-  expect(resolveLocalView("?view=status", "titlebar-a1")).toBe("status");
-  expect(resolveLocalView("?view=titlebar", "status-a1")).toBe("titlebar");
-  expect(resolveLocalView("?view=settings", "status-a1")).toBe("settings");
-  expect(resolveLocalView("?view=tabmenu", "status-a1")).toBe("tabmenu");
+  expect(resolveLocalView("?view=titlebar", "settings")).toBe("titlebar");
+  expect(resolveLocalView("?view=settings", "titlebar-a1")).toBe("settings");
+  expect(resolveLocalView("?view=tabmenu", "titlebar-a1")).toBe("tabmenu");
 });
 
 test("keeps browser previews and older local URLs usable", () => {
@@ -13,30 +12,34 @@ test("keeps browser previews and older local URLs usable", () => {
   expect(resolveLocalView("", "settings")).toBe("settings");
   expect(resolveLocalView("", "tabmenu")).toBe("tabmenu");
   expect(resolveLocalView("", "titlebar-a2")).toBe("titlebar");
-  expect(resolveLocalView("", "status-a1")).toBe("status");
-  expect(resolveLocalView("?view=unknown", null)).toBe("status");
-  expect(resolveLocalView("?view=credits", null)).toBe("status");
+  expect(resolveLocalView("", "unknown")).toBe("titlebar");
+  expect(resolveLocalView("?view=unknown", null)).toBe("titlebar");
+  expect(resolveLocalView("?view=status", null)).toBe("titlebar");
 });
 
 test("account lists survive names with separators and drop malformed entries", () => {
-  expect(parseAccounts("")).toEqual([{ id: "a1", name: "Account 1" }]);
+  expect(parseAccounts("")).toEqual([{ id: "a1", name: "" }]);
   expect(parseAccounts("?accounts=a1%3AHome%2Ca2%3AWork%252C%2520home%253A")).toEqual([
     { id: "a1", name: "Home" },
     { id: "a2", name: "Work, home:" },
   ]);
   expect(parseAccounts("?accounts=a1,a2")).toEqual([
-    { id: "a1", name: "a1" },
-    { id: "a2", name: "a2" },
+    { id: "a1", name: "" },
+    { id: "a2", name: "" },
+  ]);
+  expect(parseAccounts("?accounts=a1%3A%2Ca2%3AWork")).toEqual([
+    { id: "a1", name: "" },
+    { id: "a2", name: "Work" },
   ]);
   expect(parseAccounts("?accounts=b1:x,a1234:y,a2:%E0%A4%A,a3:ok,a3:dup")).toEqual([
     { id: "a3", name: "ok" },
   ]);
-  expect(parseAccounts("?accounts=nonsense")).toEqual([{ id: "a1", name: "Account 1" }]);
+  expect(parseAccounts("?accounts=nonsense")).toEqual([{ id: "a1", name: "" }]);
 });
 
 test("tabs list every account, keep known open ids in order and fall back to the first open one", () => {
   expect(parseTabs("?view=titlebar")).toEqual({
-    accounts: [{ id: "a1", name: "Account 1" }],
+    accounts: [{ id: "a1", name: "" }],
     open: ["a1"],
     active: "a1",
   });

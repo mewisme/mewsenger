@@ -1,76 +1,94 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Plus } from "lucide-react";
-import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";
-import type { TabMenuView } from "@/ui/local-view";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { AccountAvatar, accountLabel } from "@/ui/account-avatar";
+import type { AccountRef, TabMenuView } from "@/ui/local-view";
 
-const ROW =
-  "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs transition-colors " +
-  "hover:bg-muted focus-visible:bg-muted focus-visible:outline-none";
+interface StoredAccount {
+  id: string;
+  display_name?: string;
+  picture?: string;
+}
 
-/** Dropdown under the new-tab button: closed accounts, then a fresh sign-in. */
+const ITEM = "h-8 gap-2 px-2 text-xs";
+
+/**
+ * Dropdown under the new-tab button: closed accounts, then a fresh sign-in.
+ * It lives in a webview of its own, as tall as the menu, because the title bar
+ * webview is only 40px high and would clip it; the menu is therefore always
+ * open here and closing it closes that webview.
+ */
 export function TabMenu({ view }: { view: TabMenuView }) {
-  const list = useRef<HTMLDivElement>(null);
+  // The address carries the names; the pictures come from the app.
+  const [accounts, setAccounts] = useState<AccountRef[]>(view.accounts);
+  useEffect(() => {
+    let active = true;
+    void invoke<{ accounts?: StoredAccount[] }>("list_accounts").then((config) => {
+      if (!active || !Array.isArray(config?.accounts)) return;
+      setAccounts(view.accounts.map((shown) => {
+        const stored = config.accounts!.find((account) => account.id === shown.id);
+        return stored ? { id: shown.id, name: stored.display_name?.trim() ?? "", picture: stored.picture } : shown;
+      }));
+    }).catch(() => { /* The names from the address stay. */ });
+    return () => { active = false; };
+  }, [view.accounts]);
 
-  const items = () => Array.from(list.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
-  const close = () => invoke("close_tab_menu", {}).catch(() => {});
+  // Escape, a click outside and losing focus can all end the menu at once.
+  const closing = useRef(false);
+  const close = () => {
+    if (closing.current) return Promise.resolve();
+    closing.current = true;
+    return invoke("close_tab_menu", {}).catch(() => {});
+  };
 
   useEffect(() => {
     const { body, documentElement } = document;
     const previous = [body.style.background, documentElement.style.background];
     body.style.background = "transparent";
     documentElement.style.background = "transparent";
-    items()[0]?.focus();
     const dismiss = () => { void close(); };
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") dismiss();
-    };
-    window.addEventListener("keydown", onKey);
     window.addEventListener("blur", dismiss);
+    // The menu focuses itself once it is open; the first row is where arrows start.
+    const focusFirst = window.setTimeout(() => {
+      document.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    }, 0);
     return () => {
+      window.clearTimeout(focusFirst);
       body.style.background = previous[0];
       documentElement.style.background = previous[1];
-      window.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", dismiss);
     };
   }, []);
-
-  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    event.preventDefault();
-    const rows = items();
-    if (rows.length === 0) return;
-    const at = rows.indexOf(document.activeElement as HTMLElement);
-    const step = event.key === "ArrowDown" ? 1 : -1;
-    rows[(at + step + rows.length) % rows.length].focus();
-  }
 
   function finish(command: string, args: Record<string, unknown>) {
     void invoke(command, args).catch(() => {}).then(close);
   }
 
   return (
-    <main className="h-screen w-full overflow-hidden">
-      <div ref={list} role="menu" aria-label="Accounts" onKeyDown={onKeyDown}
-        className="flex max-h-full flex-col gap-0.5 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md">
-        {view.accounts.map((account) => (
-          <button key={account.id} type="button" role="menuitem" className={ROW}
-            onClick={() => finish("open_account", { id: account.id })}>
-            <span aria-hidden="true"
-              className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold uppercase leading-none text-primary">
-              {account.name.trim()[0] ?? "?"}
-            </span>
-            <span className="min-w-0 flex-1 truncate">{account.name}</span>
-          </button>
+    <DropdownMenu open modal={false} onOpenChange={(open) => { if (!open) void close(); }}>
+      <DropdownMenuTrigger aria-hidden="true" tabIndex={-1}
+        className="fixed top-0 left-0 h-0 w-full opacity-0" />
+      <DropdownMenuContent aria-label="Accounts" loop sideOffset={0} avoidCollisions={false}
+        className="w-(--radix-dropdown-menu-trigger-width) animate-none">
+        {accounts.map((account) => (
+          <DropdownMenuItem key={account.id} className={ITEM}
+            onSelect={(event) => { event.preventDefault(); finish("open_account", { id: account.id }); }}>
+            <AccountAvatar account={account} />
+            <span className="min-w-0 flex-1 truncate">{accountLabel(account)}</span>
+          </DropdownMenuItem>
         ))}
-        {view.accounts.length > 0 && <Separator className="my-0.5" />}
-        <button type="button" role="menuitem" className={cn(ROW)}
-          onClick={() => finish("add_account", { name: `Account ${view.next}` })}>
-          <Plus aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+        {accounts.length > 0 && <DropdownMenuSeparator />}
+        <DropdownMenuItem className={ITEM}
+          onSelect={(event) => { event.preventDefault(); finish("add_account", { name: `Account ${view.next}` }); }}>
           <span className="min-w-0 flex-1 truncate">Sign in to a new account</span>
-        </button>
-      </div>
-    </main>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

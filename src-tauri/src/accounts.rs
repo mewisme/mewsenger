@@ -8,12 +8,29 @@ use tauri::{AppHandle, Emitter, Manager};
 pub const TAB_MENU: &str = "tabmenu";
 pub const MAX_ACCOUNTS: usize = 4;
 const MAX_NAME_CHARS: usize = 24;
+const MAX_DISPLAY_CHARS: usize = 80;
+const MAX_PICTURE_BYTES: usize = 40_000;
 pub const FIRST: &str = "a1";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Account {
     pub id: String,
+    /// Name the user gave the account; shown until Messenger tells whose
+    /// account it is.
     pub name: String,
+    /// Name of the Messenger user signed in, as the page reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Their profile picture as a small JPEG data URL, as the page reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
+}
+
+impl Account {
+    /// What tabs and menus show: the signed-in user's name when known.
+    pub fn label(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.name)
+    }
 }
 
 /// Where Settings opens: its own window, or over the main window's page.
@@ -48,6 +65,8 @@ impl Default for Config {
             accounts: vec![Account {
                 id: FIRST.into(),
                 name: "Account 1".into(),
+                display_name: None,
+                picture: None,
             }],
         }
     }
@@ -146,10 +165,39 @@ impl Config {
         self.accounts.push(Account {
             id: id.clone(),
             name,
+            display_name: None,
+            picture: None,
         });
         self.open.push(id.clone());
         self.active = id.clone();
         Ok(id)
+    }
+
+    /// Records whose Messenger account `id` is, with their picture when the
+    /// page has one; true when something changed.
+    pub fn set_display_name(
+        &mut self,
+        id: &str,
+        name: &str,
+        picture: Option<&str>,
+    ) -> Result<bool, String> {
+        let name = valid_display_name(name)?;
+        let picture = picture.map(valid_picture).transpose()?;
+        let account = self
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or("unknown account")?;
+        let mut changed = false;
+        if account.display_name.as_deref() != Some(name.as_str()) {
+            account.display_name = Some(name);
+            changed = true;
+        }
+        if picture.is_some() && account.picture != picture {
+            account.picture = picture;
+            changed = true;
+        }
+        Ok(changed)
     }
 
     pub fn rename(&mut self, id: &str, name: &str) -> Result<(), String> {
@@ -222,6 +270,32 @@ impl Config {
     }
 }
 
+fn valid_display_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > MAX_DISPLAY_CHARS || name.chars().any(char::is_control) {
+        return Err("invalid account name".into());
+    }
+    Ok(name.to_string())
+}
+
+/// A picture is stored and handed to local views as it came, so only a small
+/// base64 JPEG data URL is accepted.
+fn valid_picture(picture: &str) -> Result<String, String> {
+    let data = picture
+        .strip_prefix("data:image/jpeg;base64,")
+        .ok_or("invalid picture")?;
+    let valid = !data.is_empty()
+        && picture.len() <= MAX_PICTURE_BYTES
+        && data
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b));
+    if valid {
+        Ok(picture.to_string())
+    } else {
+        Err("invalid picture".into())
+    }
+}
+
 fn valid_name(name: &str) -> Result<String, String> {
     let name = name.trim();
     let chars = name.chars().count();
@@ -239,16 +313,12 @@ pub fn titlebar_label(id: &str) -> String {
     format!("titlebar-{id}")
 }
 
-pub fn status_label(id: &str) -> String {
-    format!("status-{id}")
-}
-
 /// Account that owns a webview label, if the label is one of ours.
 pub fn account_of(label: &str) -> Option<&str> {
     if label == "main" {
         return Some(FIRST);
     }
-    let id = ["messenger-", "titlebar-", "status-"]
+    let id = ["messenger-", "titlebar-"]
         .iter()
         .find_map(|prefix| label.strip_prefix(prefix))?;
     valid_id(id).then_some(id)
@@ -335,7 +405,7 @@ fn encode_component(text: &str) -> String {
 pub fn accounts_param(accounts: &[&Account]) -> String {
     let inner = accounts
         .iter()
-        .map(|a| format!("{}:{}", a.id, encode_component(&a.name)))
+        .map(|a| format!("{}:{}", a.id, encode_component(a.display_name.as_deref().unwrap_or(""))))
         .collect::<Vec<_>>()
         .join(",");
     encode_component(&inner)
@@ -362,8 +432,24 @@ fn tab_views(webview: &tauri::Webview) -> Result<(), String> {
     )
 }
 
+/// Records the name and picture of the Messenger user behind `id` and
+/// refreshes the views.
+pub fn set_display_name(
+    app: &AppHandle,
+    id: &str,
+    name: &str,
+    picture: Option<&str>,
+) -> Result<(), String> {
+    let (changed, config) = mutate(app, |c| c.set_display_name(id, name, picture))?;
+    if changed {
+        crate::desktop::sync_accounts_menu(app);
+        announce(app, &config);
+    }
+    Ok(())
+}
+
 /// Tells the settings view and the tab strip that the configuration changed.
-fn announce(app: &AppHandle, config: &Config) {
+pub(crate) fn announce(app: &AppHandle, config: &Config) {
     let _ = app.emit_filter("accounts-changed", config, |target| {
         matches!(target, tauri::EventTarget::Webview { label }
             if label == "settings" || label.starts_with("titlebar-"))
@@ -380,7 +466,11 @@ pub fn activate(app: &AppHandle, id: &str) -> Result<Config, String> {
 
 #[tauri::command]
 pub fn list_accounts(webview: tauri::Webview, app: AppHandle) -> Result<Config, String> {
-    settings_view(&webview)?;
+    use crate::shell::LocalKind;
+    view_of(
+        &webview,
+        &[LocalKind::Settings, LocalKind::Titlebar, LocalKind::TabMenu],
+    )?;
     Ok(snapshot(&app))
 }
 
@@ -577,7 +667,6 @@ mod tests {
         for id in ["a1", "a2", "a14"] {
             assert_eq!(account_of(&remote_label(id)), Some(id));
             assert_eq!(account_of(&titlebar_label(id)), Some(id));
-            assert_eq!(account_of(&status_label(id)), Some(id));
         }
         assert_eq!(account_of("main"), Some("a1"));
         for bad in [
@@ -586,6 +675,7 @@ mod tests {
             "messenger-",
             "messenger-a",
             "messenger-a1234",
+            "status-a1",
             "messenger",
             "settings",
             "tabmenu",
@@ -757,10 +847,37 @@ mod tests {
     }
 
     #[test]
+    fn messenger_name_replaces_the_given_one_in_labels_only() {
+        let mut config = Config::default();
+        assert_eq!(config.accounts[0].label(), "Account 1");
+        assert!(config.set_display_name("a1", " Ada Lovelace ", None).unwrap());
+        assert!(!config.set_display_name("a1", "Ada Lovelace", None).unwrap());
+        assert_eq!(config.accounts[0].label(), "Ada Lovelace");
+        assert_eq!(config.accounts[0].name, "Account 1");
+        assert!(config.set_display_name("a1", "", None).is_err());
+        assert!(config.set_display_name("a1", "bad\nname", None).is_err());
+        assert!(config.set_display_name("a9", "Ada", None).is_err());
+        let picture = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+        assert!(config.set_display_name("a1", "Ada Lovelace", Some(picture)).unwrap());
+        assert!(!config.set_display_name("a1", "Ada Lovelace", Some(picture)).unwrap());
+        assert!(!config.set_display_name("a1", "Ada Lovelace", None).unwrap());
+        assert_eq!(config.accounts[0].picture.as_deref(), Some(picture));
+        for bad in ["data:image/png;base64,AAAA", "data:image/jpeg;base64,", "data:image/jpeg;base64,<script>", "https://x.example/a.jpg"] {
+            assert!(config.set_display_name("a1", "Ada", Some(bad)).is_err(), "{bad}");
+        }
+        let huge = format!("data:image/jpeg;base64,{}", "A".repeat(MAX_PICTURE_BYTES));
+        assert!(config.set_display_name("a1", "Ada", Some(&huge)).is_err());
+        let value = serde_json::to_string(&config).unwrap();
+        assert_eq!(from_json(&value).accounts[0].display_name.as_deref(), Some("Ada Lovelace"));
+    }
+
+    #[test]
     fn local_view_query_survives_commas_colons_and_non_ascii() {
         let a = Account {
             id: "a2".into(),
-            name: "Work, home: é".into(),
+            name: "Given".into(),
+            display_name: Some("Work, home: é".into()),
+            picture: None,
         };
         let value = accounts_param(&[&a]);
         assert!(value

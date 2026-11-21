@@ -169,7 +169,7 @@ pub fn sync_accounts_menu(app: &AppHandle) {
         }
     }
     for account in accounts::snapshot(app).accounts {
-        let item = MenuItemBuilder::with_id(format!("open-account-{}", account.id), &account.name)
+        let item = MenuItemBuilder::with_id(format!("open-account-{}", account.id), account.label())
             .build(app);
         match item {
             Ok(item) => {

@@ -6,6 +6,7 @@
   ],
   "permissions": [
     "allow-open-account",
+    "allow-list-accounts",
     "allow-add-account",
     "allow-close-tab-menu"
   ]

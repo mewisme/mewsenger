@@ -1,23 +1,22 @@
-export type LocalView = "titlebar" | "status" | "settings" | "tabmenu";
+export type LocalView = "titlebar" | "settings" | "tabmenu";
 
 export function resolveLocalView(search: string, fallbackLabel: string | null): LocalView {
   const params = new URLSearchParams(search);
   const selected = params.get("view");
-  if (
-    selected === "titlebar" || selected === "status" ||
-    selected === "settings" || selected === "tabmenu"
-  ) {
+  if (selected === "titlebar" || selected === "settings" || selected === "tabmenu") {
     return selected;
   }
   if (params.get("preview") === "titlebar") return "titlebar";
   if (fallbackLabel === "settings" || fallbackLabel === "tabmenu") return fallbackLabel;
-  if (fallbackLabel?.startsWith("titlebar")) return "titlebar";
-  return "status";
+  return "titlebar";
 }
 
 export interface AccountRef {
   id: string;
+  /** Messenger's name for the signed-in user; empty until the account is signed in. */
   name: string;
+  /** Their picture as a small data URL, when the app has it. */
+  picture?: string;
 }
 
 const ACCOUNT_ID = /^a[0-9]{1,3}$/;
@@ -40,11 +39,11 @@ export function parseAccounts(search: string): AccountRef[] {
   const accounts: AccountRef[] = [];
   for (const entry of raw.split(",")) {
     const [id, encoded] = [entry.split(":")[0], entry.slice(entry.indexOf(":") + 1)];
-    const name = entry.includes(":") ? safeDecode(encoded) : id;
+    const name = entry.includes(":") ? safeDecode(encoded) : "";
     if (!ACCOUNT_ID.test(id) || name === null || accounts.some((a) => a.id === id)) continue;
-    accounts.push({ id, name: name.trim() === "" ? id : name });
+    accounts.push({ id, name: name.trim() });
   }
-  return accounts.length > 0 ? accounts : [{ id: "a1", name: "Account 1" }];
+  return accounts.length > 0 ? accounts : [{ id: "a1", name: "" }];
 }
 
 export interface TabsView {

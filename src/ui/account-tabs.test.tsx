@@ -9,7 +9,7 @@ const runtime = vi.hoisted(() => ({
   unlisten: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: runtime.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: runtime.invoke, isTauri: () => true }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: runtime.listen }));
 
 const VIEW = {
@@ -61,6 +61,7 @@ function pointer(target: Element, type: string, clientX: number) {
 
 function setup() {
   render(<AccountTabs initial={VIEW} />);
+  runtime.invoke.mockClear();
   layoutTabs();
   return screen.getByRole("tab", { name: "Home" });
 }
@@ -159,4 +160,44 @@ test("the tab-shortcut event opens the dropdown like the plus button", async () 
   runtime.invoke.mockClear();
   await act(async () => announce?.({ payload: { action: "other" } }));
   expect(runtime.invoke).not.toHaveBeenCalled();
+});
+
+test("a tab shows Messenger's name and picture, and only a prompt until the account is signed in", async () => {
+  render(<AccountTabs initial={{ ...VIEW, accounts: [{ id: "a1", name: "" }, { id: "a2", name: "Work" }, { id: "a3", name: "Spare" }] }} />);
+  expect(screen.getByRole("tab", { name: "Sign in" })).toBeTruthy();
+  const changed = runtime.listen.mock.calls.find(([name]) => name === "accounts-changed")![1] as
+    (event: { payload: unknown }) => void;
+  act(() => changed({
+    payload: {
+      accounts: VIEW.accounts.map((account) => ({
+        id: account.id,
+        display_name: account.id === "a1" ? "Ada Lovelace" : account.name,
+        picture: account.id === "a1" ? "data:image/jpeg;base64,/9j/4AAQ" : undefined,
+      })),
+      open: VIEW.open,
+      active: VIEW.active,
+    },
+  }));
+  expect(await screen.findByRole("tab", { name: "Ada Lovelace" })).toBeTruthy();
+  expect(screen.queryByRole("tab", { name: "Sign in" })).toBeNull();
+  expect(screen.getByRole("tab", { name: "Work" })).toBeTruthy();
+});
+
+test("a message for a tab behind the active one animates that tab until it is opened", async () => {
+  render(<AccountTabs initial={{ ...VIEW, accounts: VIEW.accounts.map((a) => ({ ...a })) }} />);
+  const alerted = runtime.listen.mock.calls.find(([name]) => name === "tab-alert")![1] as
+    (event: { payload: unknown }) => void;
+  act(() => alerted({ payload: { account: "a2", title: "Alice", body: "are you there?" } }));
+  const tab = screen.getByRole("tab", { name: "Work: new message" });
+  expect(tab.getAttribute("title")).toBe("Alice: are you there?");
+  expect(tab.querySelector(".tab-alert-message")?.textContent).toBe("Alice: are you there?");
+  // The tab in front never alerts about itself.
+  act(() => alerted({ payload: { account: "a1", title: "Bob", body: "hi" } }));
+  expect(screen.getByRole("tab", { name: "Home" })).toBeTruthy();
+  fireEvent.click(tab);
+  expect(await screen.findByRole("tab", { name: "Work" })).toBeTruthy();
+  expect(screen.queryByRole("tab", { name: "Work: new message" })).toBeNull();
+  // Malformed alerts are ignored.
+  act(() => alerted({ payload: { account: "a3", title: 7 } }));
+  expect(screen.getByRole("tab", { name: "Spare" })).toBeTruthy();
 });

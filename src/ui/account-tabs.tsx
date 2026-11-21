@@ -1,13 +1,25 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AccountAvatar, accountLabel } from "@/ui/account-avatar";
 import type { AccountRef, TabsView } from "@/ui/local-view";
 
+interface TabAlert {
+  title: string;
+  body: string;
+}
+
+function isTabAlert(value: unknown): value is TabAlert & { account: string } {
+  const payload = value as Record<string, unknown> | null;
+  return typeof payload === "object" && payload !== null && typeof payload.account === "string" &&
+    typeof payload.title === "string" && typeof payload.body === "string";
+}
+
 interface ConfigPayload {
-  accounts: AccountRef[];
+  accounts: (AccountRef & { display_name?: string })[];
   open: string[];
   active: string;
 }
@@ -18,6 +30,11 @@ function isPayload(value: unknown): value is ConfigPayload {
     Array.isArray(payload.accounts) && Array.isArray(payload.open) &&
     payload.open.every((id) => typeof id === "string") &&
     typeof payload.active === "string";
+}
+
+/** An account as a tab shows it: Messenger's name and picture, nothing the account was merely called. */
+function shown(account: AccountRef & { display_name?: string; picture?: string }): AccountRef {
+  return { id: account.id, name: account.display_name?.trim() ?? "", picture: account.picture };
 }
 
 const DRAG_THRESHOLD = 5;
@@ -73,6 +90,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
   const [view, setView] = useState<TabsView>(initial);
   const [order, setOrder] = useState<string[] | null>(null);
   const [dragView, setDragView] = useState<DragView | null>(null);
+  const [alerts, setAlerts] = useState<Record<string, TabAlert>>({});
   const plus = useRef<HTMLButtonElement>(null);
   const holders = useRef(new Map<string, HTMLElement>());
   const drag = useRef<DragState | null>(null);
@@ -112,8 +130,16 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
       if (!isPayload(payload)) return;
       cancelRef.current();
       setOrder(null);
-      setView({ accounts: payload.accounts, open: payload.open, active: payload.active });
+      setView({ accounts: payload.accounts.map(shown), open: payload.open, active: payload.active });
     });
+    subscribe("tab-alert", (payload) => {
+      if (isTabAlert(payload)) setAlerts((current) => ({ ...current, [payload.account]: { title: payload.title, body: payload.body } }));
+    });
+    // The address of the title bar carries only what it was opened with.
+    if (isTauri()) void invoke<unknown>("list_accounts").then((config) => {
+      if (!active || !isPayload(config)) return;
+      setView({ accounts: config.accounts.map(shown), open: config.open, active: config.active });
+    }).catch(() => { /* The view from the address stays. */ });
     subscribe("tab-shortcut", (payload) => {
       if (isShortcutAction(payload) && payload.action === "new") openMenuRef.current();
     });
@@ -141,6 +167,15 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // Opening a tab answers its alert.
+  useEffect(() => {
+    setAlerts((current) => {
+      if (!(view.active in current)) return current;
+      const { [view.active]: _answered, ...rest } = current;
+      return rest;
+    });
+  }, [view.active]);
 
   const ids = order ?? view.open;
   const tabs = ids
@@ -235,10 +270,11 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
     >
       <TabsList
         aria-label="Accounts"
-        className="h-8 w-auto min-w-0 items-end justify-start gap-0.5 rounded-none bg-transparent p-0"
+        className="h-9 w-auto min-w-0 items-end justify-start gap-0.5 rounded-none bg-transparent p-0"
       >
         {tabs.map((account, index) => {
           const selected = account.id === view.active;
+          const alert = selected ? undefined : alerts[account.id];
           const dragging = dragView?.id === account.id;
           return (
             <div
@@ -260,16 +296,16 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
               }}
               style={{ transform: translation(index, dragView) }}
               className={cn(
-                "group/tab relative h-8 w-40 min-w-24 max-w-40 shrink touch-none",
-                selected && "-mb-px h-[calc(2rem+1px)]",
+                "group/tab relative h-9 w-40 min-w-[72px] max-w-40 shrink touch-none",
+                selected && "-mb-px h-[calc(2.25rem+1px)]",
                 dragView && !dragging && "transition-transform duration-150",
                 dragging && "z-10 shadow-md",
               )}
             >
               <TabsTrigger
                 value={account.id}
-                aria-label={account.name}
-                title={account.name}
+                aria-label={alert ? `${accountLabel(account)}: new message` : accountLabel(account)}
+                title={alert ? `${alert.title}: ${alert.body}` : accountLabel(account)}
                 onMouseDown={onMouseDown}
                 onClick={() => select(account.id, true)}
                 onAuxClick={(event) => {
@@ -279,7 +315,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
                   }
                 }}
                 className={cn(
-                  "h-full w-full flex-none cursor-default justify-start gap-2 rounded-b-none rounded-t-lg border-0 px-2 text-xs font-normal shadow-none transition-colors",
+                  "h-full w-full flex-none cursor-default justify-start gap-2 overflow-hidden rounded-none border-0 px-3 text-xs font-normal shadow-none transition-colors after:hidden",
                   "bg-transparent data-active:bg-transparent data-active:shadow-none dark:bg-transparent dark:data-active:border-transparent dark:data-active:bg-transparent",
                   closable && "pr-7",
                   selected
@@ -287,16 +323,23 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
                     : "text-muted-foreground hover:bg-muted",
                 )}
               >
-                <span aria-hidden="true"
-                  className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold uppercase leading-none text-primary">
-                  {account.name.trim()[0] ?? "?"}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-left">{account.name}</span>
+                <AccountAvatar account={account}
+                  className={cn("size-5", alert && "animate-pulse ring-2 ring-primary")} />
+                {alert ? (
+                  <span className="tab-alert relative h-5 min-w-0 flex-1 overflow-hidden text-left">
+                    <span className="tab-alert-name">{accountLabel(account)}</span>
+                    <span className="tab-alert-message font-medium text-foreground">{alert.title}: {alert.body}</span>
+                  </span>
+                ) : (
+                  <span className={cn("min-w-0 flex-1 truncate text-left", !account.name.trim() && "text-muted-foreground")}>
+                    {accountLabel(account)}
+                  </span>
+                )}
               </TabsTrigger>
               {closable && (
                 <button
                   type="button"
-                  aria-label={`Close tab ${account.name}`}
+                  aria-label={`Close tab ${accountLabel(account)}`}
                   tabIndex={selected ? 0 : -1}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -305,7 +348,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
                   onPointerDown={(event) => event.stopPropagation()}
                   onMouseDown={(event) => event.stopPropagation()}
                   className={cn(
-                    "absolute right-2 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center rounded-sm transition-colors hover:bg-foreground/10",
+                    "absolute right-2 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center transition-colors hover:bg-foreground/10",
                     "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     selected ? "opacity-100" : "opacity-0 group-hover/tab:opacity-100",
                   )}
@@ -324,7 +367,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
         aria-haspopup="menu"
         title="New tab"
         onClick={openMenu}
-        className="mb-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="mb-1.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <Plus aria-hidden="true" className="size-4" />
       </button>
