@@ -195,3 +195,53 @@ test('new message uses existing Messenger link and stays inactive if missing', (
   assert.equal(p.window.__mewDesktopAction('new-chat'), true);
   assert.equal(newChat.clicked, 1);
 });
+function chatPage(count) {
+  const p = page();
+  p.state.chats = Array.from({ length: count }, (_, index) => {
+    const chat = new p.Element();
+    chat.href = `https://www.messenger.com/t/${100 + index}`;
+    return chat;
+  });
+  p.flush();
+  return p;
+}
+
+test('Ctrl+number opens that chat and ignores numbers past the list', () => {
+  const p = chatPage(3);
+  const hit = p.fire('document:keydown', { key: '2', ctrlKey: true });
+  assert.equal(hit.defaultPrevented, true);
+  assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [0, 1, 0]);
+  const miss = p.fire('document:keydown', { key: '9', ctrlKey: true });
+  assert.equal(miss.defaultPrevented, false);
+  assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [0, 1, 0]);
+});
+
+test('Ctrl+number leaves other text inputs alone', () => {
+  const p = chatPage(2);
+  const search = new p.Element();
+  p.state.search = search;
+  search.focus();
+  const event = p.fire('document:keydown', { key: '1', ctrlKey: true });
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(p.state.chats[0].clicked, 0);
+});
+
+test('Ctrl+Shift+brackets and Ctrl+Tab move between chats', () => {
+  const p = chatPage(3);
+  p.location.pathname = '/t/101';
+  p.fire('document:keydown', { key: '}', code: 'BracketRight', ctrlKey: true, shiftKey: true });
+  assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [0, 0, 1]);
+  p.fire('document:keydown', { key: '{', code: 'BracketLeft', ctrlKey: true, shiftKey: true });
+  assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [1, 0, 1]);
+  p.fire('document:keydown', { key: 'Tab', ctrlKey: true });
+  assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [1, 0, 2]);
+  p.fire('document:keydown', { key: 'Tab', ctrlKey: true, shiftKey: true });
+  assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [2, 0, 2]);
+});
+
+test('shortcuts ignore IME composition', () => {
+  const p = chatPage(2);
+  const event = p.fire('document:keydown', { key: '1', ctrlKey: true, isComposing: true });
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(p.state.chats[0].clicked, 0);
+});

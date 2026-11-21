@@ -202,16 +202,33 @@
     'zoom-reset': () => { if (!zoom) return false; resetZoom(); return true; },
   };
   window.__mewDesktopAction = (name) => actions[name]?.() ?? false;
+  const openChat = (n) => { const link = chatLinks()[n - 1]; if (!link) return false; link.click(); return true; };
+  const foreignInput = () => { const el = document.activeElement; return editing(el) && el !== composer(); };
   document.addEventListener('keydown', (event) => {
     if (event.defaultPrevented || event.isComposing || event.repeat) return;
     const modifier = /Mac/.test(navigator.platform) ? event.metaKey : event.ctrlKey;
-    if (!modifier || (event.shiftKey && event.key.toLowerCase() !== 'n') ||
-        (event.altKey && editing(document.activeElement))) return;
-    const action = event.altKey
-      ? (event.key === 'ArrowDown' ? 'next-chat' : event.key === 'ArrowUp' ? 'prev-chat' : null)
-      : ({ k: 'search', n: event.shiftKey ? 'new-chat' : null,
-        '+': 'zoom-in', '=': 'zoom-in', '-': 'zoom-out', '0': 'zoom-reset' }[event.key.toLowerCase()] ?? null);
-    if (action && actions[action]?.()) {
+    if (!modifier) return;
+    const key = event.key.toLowerCase();
+    let run = null;
+    if (event.altKey) {
+      if (event.shiftKey || editing(document.activeElement)) return;
+      const action = event.key === 'ArrowDown' ? 'next-chat' : event.key === 'ArrowUp' ? 'prev-chat' : null;
+      run = action && actions[action];
+    } else if (event.shiftKey) {
+      if (key === 'n') run = actions['new-chat'];
+      else if (!foreignInput()) {
+        if (event.code === 'BracketRight') run = actions['next-chat'];
+        else if (event.code === 'BracketLeft' || key === 'tab') run = actions['prev-chat'];
+      }
+    } else if (/^[1-9]$/.test(key)) {
+      if (!foreignInput()) run = () => openChat(Number(key));
+    } else if (key === 'tab') {
+      if (!foreignInput()) run = actions['next-chat'];
+    } else {
+      const action = { k: 'search', '+': 'zoom-in', '=': 'zoom-in', '-': 'zoom-out', '0': 'zoom-reset' }[key];
+      run = action && actions[action];
+    }
+    if (run && run()) {
       event.preventDefault();
       event.stopPropagation();
     }
