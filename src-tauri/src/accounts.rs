@@ -272,7 +272,10 @@ impl Config {
 
 fn valid_display_name(name: &str) -> Result<String, String> {
     let name = name.trim();
-    if name.is_empty() || name.chars().count() > MAX_DISPLAY_CHARS || name.chars().any(char::is_control) {
+    if name.is_empty()
+        || name.chars().count() > MAX_DISPLAY_CHARS
+        || name.chars().any(char::is_control)
+    {
         return Err("invalid account name".into());
     }
     Ok(name.to_string())
@@ -405,7 +408,13 @@ fn encode_component(text: &str) -> String {
 pub fn accounts_param(accounts: &[&Account]) -> String {
     let inner = accounts
         .iter()
-        .map(|a| format!("{}:{}", a.id, encode_component(a.display_name.as_deref().unwrap_or(""))))
+        .map(|a| {
+            format!(
+                "{}:{}",
+                a.id,
+                encode_component(a.display_name.as_deref().unwrap_or(""))
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
     encode_component(&inner)
@@ -850,7 +859,9 @@ mod tests {
     fn messenger_name_replaces_the_given_one_in_labels_only() {
         let mut config = Config::default();
         assert_eq!(config.accounts[0].label(), "Account 1");
-        assert!(config.set_display_name("a1", " Ada Lovelace ", None).unwrap());
+        assert!(config
+            .set_display_name("a1", " Ada Lovelace ", None)
+            .unwrap());
         assert!(!config.set_display_name("a1", "Ada Lovelace", None).unwrap());
         assert_eq!(config.accounts[0].label(), "Ada Lovelace");
         assert_eq!(config.accounts[0].name, "Account 1");
@@ -858,17 +869,32 @@ mod tests {
         assert!(config.set_display_name("a1", "bad\nname", None).is_err());
         assert!(config.set_display_name("a9", "Ada", None).is_err());
         let picture = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
-        assert!(config.set_display_name("a1", "Ada Lovelace", Some(picture)).unwrap());
-        assert!(!config.set_display_name("a1", "Ada Lovelace", Some(picture)).unwrap());
+        assert!(config
+            .set_display_name("a1", "Ada Lovelace", Some(picture))
+            .unwrap());
+        assert!(!config
+            .set_display_name("a1", "Ada Lovelace", Some(picture))
+            .unwrap());
         assert!(!config.set_display_name("a1", "Ada Lovelace", None).unwrap());
         assert_eq!(config.accounts[0].picture.as_deref(), Some(picture));
-        for bad in ["data:image/png;base64,AAAA", "data:image/jpeg;base64,", "data:image/jpeg;base64,<script>", "https://x.example/a.jpg"] {
-            assert!(config.set_display_name("a1", "Ada", Some(bad)).is_err(), "{bad}");
+        for bad in [
+            "data:image/png;base64,AAAA",
+            "data:image/jpeg;base64,",
+            "data:image/jpeg;base64,<script>",
+            "https://x.example/a.jpg",
+        ] {
+            assert!(
+                config.set_display_name("a1", "Ada", Some(bad)).is_err(),
+                "{bad}"
+            );
         }
         let huge = format!("data:image/jpeg;base64,{}", "A".repeat(MAX_PICTURE_BYTES));
         assert!(config.set_display_name("a1", "Ada", Some(&huge)).is_err());
         let value = serde_json::to_string(&config).unwrap();
-        assert_eq!(from_json(&value).accounts[0].display_name.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(
+            from_json(&value).accounts[0].display_name.as_deref(),
+            Some("Ada Lovelace")
+        );
     }
 
     #[test]

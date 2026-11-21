@@ -724,7 +724,10 @@ mod tests {
         let short = Some(Duration::from_secs(299));
         assert!(low_memory_tabs(&open, "a1", &mut last, short, now, after).is_empty());
         let long = Some(Duration::from_secs(300));
-        assert_eq!(low_memory_tabs(&open, "a1", &mut last, long, now, after).len(), 2);
+        assert_eq!(
+            low_memory_tabs(&open, "a1", &mut last, long, now, after).len(),
+            2
+        );
     }
 
     #[test]

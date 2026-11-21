@@ -31,15 +31,23 @@ pub(crate) fn move_dir(old: &Path, new: &Path) -> io::Result<bool> {
 /// Runs before anything reads or creates the app's data.
 pub fn run(app: &AppHandle) {
     let paths = app.path();
-    for new in [paths.app_config_dir(), paths.app_data_dir(), paths.app_local_data_dir()]
-        .into_iter()
-        .flatten()
+    for new in [
+        paths.app_config_dir(),
+        paths.app_data_dir(),
+        paths.app_local_data_dir(),
+    ]
+    .into_iter()
+    .flatten()
     {
         let Some(old) = new.parent().map(|parent| parent.join(OLD_IDENTIFIER)) else {
             continue;
         };
         if let Err(error) = move_dir(&old, &new) {
-            eprintln!("could not move {} to {}: {error}", old.display(), new.display());
+            eprintln!(
+                "could not move {} to {}: {error}",
+                old.display(),
+                new.display()
+            );
         }
     }
 }
@@ -49,7 +57,8 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("mewsenger-migrate-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("mewsenger-migrate-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

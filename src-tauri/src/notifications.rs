@@ -402,11 +402,7 @@ fn safe_string(value: &str, max: usize) -> Option<&str> {
 
 fn trim_history(state: &mut NotificationState, now: Instant) {
     state.seen.retain(|key, time| {
-        let max_age = if key.starts_with("body:") {
-            15
-        } else {
-            600
-        };
+        let max_age = if key.starts_with("body:") { 15 } else { 600 };
         now.duration_since(*time) < Duration::from_secs(max_age)
     });
     while state
