@@ -4,6 +4,7 @@ mod desktop;
 mod diagnostics;
 mod downloads;
 mod links;
+mod migrate;
 mod notifications;
 mod prefs;
 mod shell;
@@ -38,7 +39,7 @@ fn open_popup<R: Runtime>(
     let navigation_app = app.clone();
     let popup_app = app.clone();
     let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
-        .title("Messenger")
+        .title("Mewsenger")
         .window_features(features)
         .initialization_script(site::current().prelude())
         .initialization_script(INJECT_SCRIPT)
@@ -107,6 +108,7 @@ pub fn run() {
             Some(vec!["--minimized"]),
         ))
         .setup(|app| {
+            migrate::run(app.handle());
             appid::register(app.handle());
             let saved = prefs::load(app.handle());
             prefs::apply_theme(app.handle(), saved.theme);
@@ -121,7 +123,7 @@ pub fn run() {
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
             }
             let window = WindowBuilder::new(app, "main")
-                .title("Messenger")
+                .title("Mewsenger")
                 .inner_size(800.0, 600.0)
                 .min_inner_size(800.0, 600.0)
                 .decorations(false)
