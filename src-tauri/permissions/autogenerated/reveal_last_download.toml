@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reveal-last-download"
+description = "Enables the reveal_last_download command without any pre-configured scope."
+commands.allow = ["reveal_last_download"]
+
+[[permission]]
+identifier = "deny-reveal-last-download"
+description = "Denies the reveal_last_download command without any pre-configured scope."
+commands.deny = ["reveal_last_download"]

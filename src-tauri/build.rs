@@ -8,6 +8,11 @@ fn main() {
             "show_settings",
             "get_preferences",
             "set_preference",
+            "reveal_last_download",
+            "get_update_state",
+            "check_update",
+            "install_update",
+            "get_diagnostics",
         ]),
     ))
     .expect("could not prepare Tauri application");

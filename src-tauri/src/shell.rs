@@ -32,6 +32,17 @@ pub(crate) fn local_asset_url(url: &Url) -> bool {
     }
 }
 
+/// True for a local UI webview allowed to call a status/settings command.
+pub(crate) fn local_webview(webview: &tauri::Webview, labels: &[&str]) -> bool {
+    let owner_ok = match webview.label() {
+        STATUS => webview.window().label() == "main",
+        _ => true,
+    };
+    owner_ok
+        && labels.contains(&webview.label())
+        && webview.url().is_ok_and(|url| local_asset_url(&url))
+}
+
 fn bounds(window: &Window) -> tauri::Result<(f64, f64)> {
     let physical = window.inner_size()?;
     let scale = window.scale_factor()?;
@@ -94,7 +105,7 @@ pub fn mount(app: &AppHandle, window: &Window, start_hidden: bool) -> tauri::Res
             .initialization_script(NOTIFICATIONS_SCRIPT)
             .on_navigation(move |url| crate::links::allow_navigation(&navigation_app, url))
             .on_new_window(move |url, features| open_popup(&popup_app, url, features))
-            .on_download(|_, _| true),
+            .on_download(crate::downloads::handler(app.clone())),
         LogicalPosition::new(0.0, 0.0),
         LogicalSize::new(width, height),
     )?;

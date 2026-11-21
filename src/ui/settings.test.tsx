@@ -13,7 +13,7 @@ const mock = vi.hoisted(() => ({
   handler: undefined as ((event: { payload: { notification_preview: boolean } }) => void) | undefined,
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: mock.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: mock.invoke, isTauri: () => true }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mock.listen }));
 vi.mock("@tauri-apps/plugin-autostart", () => ({
   isEnabled: mock.isEnabled,
@@ -104,4 +104,44 @@ test("autostart is read from the system and toggled through the plugin", async (
   expect(mock.enable).toHaveBeenCalledOnce();
   await user.click(toggle);
   expect(mock.disable).toHaveBeenCalledOnce();
+});
+
+test("copy diagnostics writes exactly what the backend returned", async () => {
+  const diagnostics = { app_version: "0.1.14", os: "windows", session: true, unread_known: false };
+  mock.invoke.mockImplementation((command: string) =>
+    command === "get_diagnostics"
+      ? Promise.resolve(diagnostics)
+      : command === "get_preferences"
+        ? Promise.resolve({ notification_preview: true })
+        : Promise.reject(new Error("x")));
+  const user = userEvent.setup();
+  const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+  render(<Settings version="0.1.14" />);
+  await user.click(screen.getByRole("button", { name: "Copy diagnostics" }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(JSON.stringify(diagnostics, null, 2)));
+});
+
+test("update section follows the update state and installs when one is available", async () => {
+  mock.invoke.mockImplementation((command: string) =>
+    command === "get_update_state"
+      ? Promise.resolve({ state: "available", version: "0.2.0" })
+      : command === "get_preferences"
+        ? Promise.resolve({ notification_preview: true })
+        : command === "install_update"
+          ? Promise.resolve({ state: "downloading" })
+          : Promise.reject(new Error("x")));
+  const user = userEvent.setup();
+  render(<Settings version="0.1.14" />);
+  expect(await screen.findByText("Install version 0.2.0")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Install update" }));
+  expect(mock.invoke).toHaveBeenCalledWith("install_update");
+  expect(await screen.findByText("Downloading update")).toBeTruthy();
+});
+
+test("every settings control has an accessible name", async () => {
+  render(<Settings version="0.1.14" />);
+  await waitFor(() => expect(screen.getAllByRole("switch").length).toBe(2));
+  for (const control of [...screen.getAllByRole("switch"), ...screen.getAllByRole("button")]) {
+    expect((control.getAttribute("aria-label") ?? control.textContent ?? "").trim()).not.toBe("");
+  }
 });

@@ -49,8 +49,8 @@ beforeEach(() => {
   runtime.view = "status";
   runtime.statusListener = undefined;
   runtime.unlisten.mockReset();
-  runtime.listen.mockReset().mockImplementation((_name, callback) => {
-    runtime.statusListener = callback;
+  runtime.listen.mockReset().mockImplementation((name, callback) => {
+    if (name === "desktop-status") runtime.statusListener = callback;
     return Promise.resolve(runtime.unlisten);
   });
   runtime.invoke.mockReset().mockImplementation((name) =>
@@ -167,5 +167,22 @@ test("removes the native status event listener when the view unmounts", async ()
   const { unmount } = render(<DesktopApp />);
   await waitFor(() => expect(runtime.invoke).toHaveBeenCalledWith("current_status"));
   unmount();
-  expect(runtime.unlisten).toHaveBeenCalledOnce();
+  // status, download and update subscriptions
+  expect(runtime.unlisten).toHaveBeenCalledTimes(3);
+});
+
+test("connection label follows the verified session, with offline taking priority", async () => {
+  render(<DesktopApp />);
+  const { act } = await import("@testing-library/react");
+  const label = () => screen.getByRole("status", { name: "Connection status" }).textContent;
+  await waitFor(() => expect(runtime.statusListener).toBeTruthy());
+  await act(async () => runtime.statusListener?.({ payload: { unread_count: 0, session: true } }));
+  expect(label()).toBe("Connected");
+  await act(async () => runtime.statusListener?.({ payload: { unread_count: 0, session: false } }));
+  expect(label()).toBe("Signed out");
+  await act(async () => window.dispatchEvent(new Event("offline")));
+  expect(label()).toBe("Offline");
+  await act(async () => runtime.statusListener?.({ payload: { unread_count: null, session: null } }));
+  await act(async () => window.dispatchEvent(new Event("online")));
+  expect(label()).toBe("Status unavailable");
 });

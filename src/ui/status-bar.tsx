@@ -1,10 +1,14 @@
-import { Bell, CircleDot, Info, RefreshCcw, Settings } from "lucide-react";
+import { Bell, CircleDot, Download, Info, RefreshCcw, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  downloadTooltip, updateActionable, updateTooltip,
+  type DownloadStatus, type UpdateState,
+} from "@/ui/status-types";
 
-export type ConnectionState = "connected" | "offline" | "unknown";
+export type ConnectionState = "connected" | "offline" | "signed_out" | "unknown";
 
 export interface StatusBarProps {
   version: string;
@@ -14,17 +18,26 @@ export interface StatusBarProps {
   onSettings?: () => void;
   onTestNotification?: () => void;
   notificationTestStatus?: string | null;
+  update?: UpdateState;
+  onUpdate?: () => void;
+  download?: DownloadStatus | null;
+  onRevealDownload?: () => void;
 }
 
 const labels: Record<ConnectionState, string> = {
   connected: "Connected",
   offline: "Offline",
+  signed_out: "Signed out",
   unknown: "Status unavailable",
 };
 
+const unconfigured: UpdateState = { state: "unconfigured" };
+
 export function StatusBar({
-  version, connection, unreadCount, onCredits, onSettings, onTestNotification, notificationTestStatus,
+  version, connection, unreadCount, onCredits, onSettings, onTestNotification,
+  notificationTestStatus, update = unconfigured, onUpdate, download, onRevealDownload,
 }: StatusBarProps) {
+  const updatesOff = update.state === "unconfigured";
   return (
     <TooltipProvider>
       <footer
@@ -39,6 +52,19 @@ export function StatusBar({
           <output aria-label="Unread conversations">
             <Badge variant="secondary">{unreadCount === null ? "–" : Math.max(0, unreadCount)}</Badge>
           </output>
+          {download && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-xs" type="button"
+                  disabled={download.state !== "done"}
+                  onClick={download.state === "done" ? onRevealDownload : undefined}
+                  aria-label="Download status">
+                  <Download aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{downloadTooltip(download)}</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon-xs" type="button"
@@ -56,11 +82,14 @@ export function StatusBar({
           </span>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-xs" type="button" disabled aria-label="Updates unavailable">
+              <Button variant="ghost" size="icon-xs" type="button"
+                disabled={updatesOff || !onUpdate || !updateActionable(update)}
+                onClick={onUpdate}
+                aria-label={updatesOff ? "Updates unavailable" : "Updates"}>
                 <RefreshCcw aria-hidden="true" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">Updates are not configured</TooltipContent>
+            <TooltipContent side="top">{updateTooltip(update)}</TooltipContent>
           </Tooltip>
           <Separator orientation="vertical" className="h-3" />
           <span aria-label="Application version" className="tabular-nums">{version}</span>

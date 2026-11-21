@@ -113,6 +113,7 @@
   let knownMarker = false;
   let sentReset = false;
   let unreadBaseline = false;
+  let lastSession = null;
   const sync = () => {
     scheduled = false;
     const list = unreadThreads();
@@ -157,10 +158,21 @@
         knownMarker = false;
         previousUnread = new Set();
         unreadBaseline = false;
+        lastSession = null;
         send({ kind: 'reset' });
         sentReset = true;
       }
     } else sentReset = false;
+    // Report only a positively recognized state; anything else stays unknown.
+    const passwordField = [...document.querySelectorAll('input[type="password"]')]
+      .some((el) => el.getBoundingClientRect?.().width > 0);
+    const session = loadedChats && document.querySelector('[role="navigation"],nav')
+      ? 'signed_in'
+      : (passwordField || location.pathname.startsWith('/login') ? 'signed_out' : null);
+    if (session && session !== lastSession) {
+      lastSession = session;
+      send({ kind: 'session', state: session });
+    }
   };
   const queue = () => {
     if (scheduled) return;

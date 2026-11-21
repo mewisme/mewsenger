@@ -9,6 +9,10 @@
     "core:window:allow-close",
     "allow-get-preferences",
     "allow-set-preference",
+    "allow-get-update-state",
+    "allow-check-update",
+    "allow-install-update",
+    "allow-get-diagnostics",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"

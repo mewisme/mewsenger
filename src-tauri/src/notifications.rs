@@ -35,6 +35,17 @@ pub struct NotificationState {
     pending: HashMap<i32, PendingToast>,
     next_toast_id: i32,
     unread: Option<usize>,
+    session: Option<bool>,
+}
+
+impl NotificationState {
+    pub fn session(&self) -> Option<bool> {
+        self.session
+    }
+
+    pub fn unread(&self) -> Option<usize> {
+        self.unread
+    }
 }
 
 struct PendingToast {
@@ -79,6 +90,7 @@ pub fn clicked_thread(app: &AppHandle, id: i32) -> Option<Url> {
 #[derive(Clone, Serialize)]
 pub struct DesktopStatus {
     unread_count: Option<usize>,
+    session: Option<bool>,
 }
 
 fn trusted_status_view(webview: &Webview) -> bool {
@@ -104,12 +116,15 @@ pub fn test_notification(app: AppHandle, webview: Webview) -> Result<(), String>
         })
 }
 
-fn publish_status(app: &AppHandle, unread_count: Option<usize>) {
+fn publish_status(app: &AppHandle, unread_count: Option<usize>, session: Option<bool>) {
     // Do not send thread IDs, notification bodies, or account data to local UI.
     let _ = app.emit_to(
         EventTarget::webview("status"),
         "desktop-status",
-        DesktopStatus { unread_count },
+        DesktopStatus {
+            unread_count,
+            session,
+        },
     );
 }
 
@@ -121,8 +136,11 @@ pub fn current_status(
     if !trusted_status_view(&webview) {
         return Err("local status view required".into());
     }
-    let unread_count = state.lock().map_err(|_| "status unavailable")?.unread;
-    Ok(DesktopStatus { unread_count })
+    let state = state.lock().map_err(|_| "status unavailable")?;
+    Ok(DesktopStatus {
+        unread_count: state.unread,
+        session: state.session,
+    })
 }
 
 #[derive(Deserialize)]
@@ -142,6 +160,9 @@ pub enum MessageEvent {
     },
     Read {
         thread_id: String,
+    },
+    Session {
+        state: String,
     },
     Reset,
 }
@@ -186,6 +207,7 @@ fn trim_history(state: &mut NotificationState, now: Instant) {
 fn reset_view_state(state: &mut NotificationState) {
     state.pending.clear();
     state.unread = None;
+    state.session = None;
     // Keep deduplication and rate limits across navigation and page reloads.
     // A remote page must not reset notification throttling.
 }
@@ -259,6 +281,14 @@ fn unread_icon(count: usize) -> tauri::image::Image<'static> {
     tauri::image::Image::new_owned(rgba, W as u32, H as u32)
 }
 
+fn parse_session(state: &str) -> Result<bool, String> {
+    match state {
+        "signed_in" => Ok(true),
+        "signed_out" => Ok(false),
+        _ => Err("invalid session state".into()),
+    }
+}
+
 fn badge(app: &AppHandle, count: usize) {
     let Some(window) = app.get_window("main") else {
         return;
@@ -295,7 +325,7 @@ pub fn notification_event(
     let now = Instant::now();
     let mut notifications = state.lock().map_err(|_| "notification state unavailable")?;
     trim_history(&mut notifications, now);
-    let mut status_change = None;
+    let mut status_change = false;
     match event {
         MessageEvent::Notify {
             id,
@@ -361,7 +391,8 @@ pub fn notification_event(
             if notifications.unread != Some(count) {
                 notifications.unread = Some(count);
                 badge(&app, count);
-                status_change = Some(Some(count));
+                crate::desktop::set_tray_tooltip(&app, count);
+                status_change = true;
             }
         }
         MessageEvent::NewUnread { thread_id } => {
@@ -404,12 +435,21 @@ pub fn notification_event(
         MessageEvent::Reset => {
             reset_view_state(&mut notifications);
             badge(&app, 0);
-            status_change = Some(None);
+            crate::desktop::set_tray_tooltip(&app, 0);
+            status_change = true;
+        }
+        MessageEvent::Session { state } => {
+            let signed_in = parse_session(&state)?;
+            if notifications.session != Some(signed_in) {
+                notifications.session = Some(signed_in);
+                status_change = true;
+            }
         }
     }
+    let snapshot = (notifications.unread, notifications.session);
     drop(notifications);
-    if let Some(count) = status_change {
-        publish_status(&app, count);
+    if status_change {
+        publish_status(&app, snapshot.0, snapshot.1);
     }
     Ok(())
 }
@@ -595,5 +635,36 @@ mod tests {
             .rate
             .extend(std::iter::repeat_n(now, MAX_TOASTS_PER_MINUTE));
         assert!(!should_show_background_unread(&state, "456", true));
+    }
+
+    #[test]
+    fn session_state_accepts_only_known_values() {
+        assert_eq!(parse_session("signed_in"), Ok(true));
+        assert_eq!(parse_session("signed_out"), Ok(false));
+        assert_eq!(
+            parse_session("connected").err().as_deref(),
+            Some("invalid session state")
+        );
+        assert!(parse_session("").is_err());
+    }
+
+    #[test]
+    fn leaving_messenger_returns_unread_and_session_to_unknown() {
+        let mut state = NotificationState {
+            unread: Some(3),
+            session: Some(true),
+            ..Default::default()
+        };
+        state.pending.insert(
+            1,
+            PendingToast {
+                thread: "123".into(),
+                created: Instant::now(),
+            },
+        );
+        reset_view_state(&mut state);
+        assert_eq!(state.unread, None);
+        assert_eq!(state.session, None);
+        assert!(state.pending.is_empty());
     }
 }

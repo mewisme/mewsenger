@@ -1,10 +1,13 @@
 mod appid;
 mod desktop;
+mod diagnostics;
+mod downloads;
 mod links;
 mod notifications;
 mod prefs;
 mod shell;
 mod site;
+mod updater;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -41,7 +44,7 @@ fn open_popup<R: Runtime>(
         .initialization_script(NOTIFICATIONS_SCRIPT)
         .on_navigation(move |url| links::allow_navigation(&navigation_app, url))
         .on_new_window(move |url, features| open_popup(&popup_app, url, features))
-        .on_download(|_, _| true);
+        .on_download(downloads::handler(app.clone()));
 
     match builder.build() {
         Ok(window) => NewWindowResponse::Create { window },
@@ -60,6 +63,7 @@ pub fn run() {
         .manage(std::sync::Mutex::new(
             notifications::NotificationState::default(),
         ))
+        .manage(std::sync::Mutex::new(downloads::DownloadState::default()))
         .invoke_handler(tauri::generate_handler![
             notifications::notification_event,
             notifications::current_status,
@@ -67,7 +71,12 @@ pub fn run() {
             shell::show_credits,
             shell::show_settings,
             prefs::get_preferences,
-            prefs::set_preference
+            prefs::set_preference,
+            downloads::reveal_last_download,
+            updater::get_update_state,
+            updater::check_update,
+            updater::install_update,
+            diagnostics::get_diagnostics
         ])
         .on_window_event(|window, event| {
             desktop::on_window_event(window, event);
@@ -91,6 +100,14 @@ pub fn run() {
         .setup(|app| {
             appid::register(app.handle());
             app.manage(std::sync::Mutex::new(prefs::load(app.handle())));
+            let updater_configured = updater::configured(app.handle());
+            app.manage(std::sync::Mutex::new(updater::initial_state(
+                updater_configured,
+            )));
+            if updater_configured {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
             let window = WindowBuilder::new(app, "main")
                 .title("Messenger")
                 .inner_size(800.0, 600.0)

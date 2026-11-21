@@ -288,6 +288,8 @@ test('only the scoped Messenger command is granted to remote content', () => {
   assert.deepEqual(local.permissions, [
     'core:default', 'allow-show-credits', 'allow-show-settings',
     'allow-current-status', 'allow-test-notification',
+    'allow-reveal-last-download', 'allow-get-update-state', 'allow-check-update',
+    'allow-install-update', 'allow-get-diagnostics',
   ]);
   assert.deepEqual(credits.webviews, ['credits']);
   assert.equal(credits.windows, undefined);
@@ -333,4 +335,39 @@ test('script follows the configured site profile', () => {
   const inert = createPage({ siteProfile: null });
   assert.equal(inert.window.__mewNotificationsInstalled, undefined);
   assert.equal(inert.handlers.size, 0);
+});
+
+test('session state is reported once per change and only when recognized', () => {
+  const p = createPage();
+  p.flush();
+  assert.equal(p.events.some((e) => e.event.kind === 'session'), false, 'no chats yet: unknown');
+  p.addThread('a', 'Seen');
+  p.refresh();
+  p.refresh();
+  const sessions = () => p.events.filter((e) => e.event.kind === 'session').map((e) => e.event.state);
+  assert.deepEqual(sessions(), ['signed_in']);
+});
+
+test('the login page reports signed out', () => {
+  const p = createPage({ url: 'https://www.messenger.com/login/' });
+  p.flush();
+  p.refresh();
+  assert.deepEqual(
+    p.events.filter((e) => e.event.kind === 'session').map((e) => e.event.state),
+    ['signed_out'],
+  );
+});
+
+test('a reloaded page re-baselines instead of announcing old unread conversations', () => {
+  const p = createPage();
+  p.blur();
+  p.addThread('a', 'Unread message');
+  p.refresh();
+  assert.equal(p.events.some((e) => e.event.kind === 'new_unread'), false);
+  p.addThread('b', 'Unread message');
+  p.refresh();
+  assert.deepEqual(
+    p.events.filter((e) => e.event.kind === 'new_unread').map((e) => e.event.thread_id),
+    ['b'],
+  );
 });

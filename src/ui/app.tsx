@@ -10,6 +10,9 @@ import { resolveLocalView } from "@/ui/local-view";
 import { Credits } from "@/ui/credits";
 import { Settings } from "@/ui/settings";
 
+import type { DownloadStatus } from "@/ui/status-types";
+import { useUpdate } from "@/ui/use-update";
+
 export function DesktopApp() {
   const [version, setVersion] = useState("Version unavailable");
   const [creditsOpen, setCreditsOpen] = useState(false);
@@ -22,6 +25,9 @@ export function DesktopApp() {
   const titlebarView = localView === "titlebar";
   const settingsView = localView === "settings";
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
+  const [session, setSession] = useState<boolean | null>(null);
+  const [download, setDownload] = useState<DownloadStatus | null>(null);
+  const { update, act } = useUpdate(!creditsView && !titlebarView && !settingsView);
   const [connection, setConnection] = useState<"offline" | "unknown">(
     () => typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "unknown",
   );
@@ -40,26 +46,43 @@ export function DesktopApp() {
     let active = true;
     let eventReceived = false;
     let detach: (() => void) | undefined;
-    const accept = (count: number | null) => {
+    const accept = (count: number | null, nextSession?: boolean | null) => {
       if (!active) return;
       // Only display a count that the native bridge has confirmed.
       setUnreadCount(typeof count === "number" && Number.isSafeInteger(count) &&
         count >= 0 ? count : null);
+      setSession(typeof nextSession === "boolean" ? nextSession : null);
     };
-    void listen<{ unread_count: number | null }>("desktop-status", (event) => {
+    void listen<{ unread_count: number | null; session?: boolean | null }>("desktop-status", (event) => {
       eventReceived = true;
-      accept(event.payload.unread_count);
+      accept(event.payload.unread_count, event.payload.session);
     }).then((unlisten) => {
       if (!active) {
         unlisten();
         return;
       }
       detach = unlisten;
-      return invoke<{ unread_count: number | null }>("current_status")
+      return invoke<{ unread_count: number | null; session?: boolean | null }>("current_status")
         .then((snapshot) => {
-          if (!eventReceived) accept(snapshot.unread_count);
+          if (!eventReceived) accept(snapshot.unread_count, snapshot.session);
         });
     }).catch(() => { /* Keep the unverified value unknown. */ });
+    return () => {
+      active = false;
+      detach?.();
+    };
+  }, [creditsView, titlebarView, settingsView]);
+
+  useEffect(() => {
+    if (!isTauri() || creditsView || titlebarView || settingsView) return;
+    let active = true;
+    let detach: (() => void) | undefined;
+    void listen<DownloadStatus>("download-status", (event) => {
+      if (active) setDownload(event.payload);
+    }).then((unlisten) => {
+      if (active) detach = unlisten;
+      else unlisten();
+    }).catch(() => { /* No download indicator without events. */ });
     return () => {
       active = false;
       detach?.();
@@ -112,11 +135,15 @@ export function DesktopApp() {
       <div className="min-h-0 flex-1" aria-hidden="true" />
       <StatusBar
         version={version}
-        connection={connection}
+        connection={connection === "offline" ? "offline" : session === true ? "connected" : session === false ? "signed_out" : "unknown"}
         unreadCount={unreadCount}
         onCredits={showCredits}
         onSettings={isTauri() ? showSettings : undefined}
         onTestNotification={isTauri() ? testDesktopNotification : undefined}
+        update={update}
+        onUpdate={isTauri() ? act : undefined}
+        download={download}
+        onRevealDownload={() => { void invoke("reveal_last_download").catch(() => {}); }}
         notificationTestStatus={notificationTestStatus}
       />
       <Dialog open={creditsOpen} onOpenChange={setCreditsOpen}>
