@@ -1,7 +1,9 @@
 {
   "identifier": "titlebar",
   "description": "Local window chrome controls only",
-  "webviews": ["titlebar-*"],
+  "webviews": [
+    "titlebar-*"
+  ],
   "permissions": [
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
@@ -11,6 +13,7 @@
     "core:window:allow-is-maximized",
     "core:window:allow-close",
     "core:event:allow-listen",
-    "core:event:allow-unlisten"
+    "core:event:allow-unlisten",
+    "allow-switch-account"
   ]
 }

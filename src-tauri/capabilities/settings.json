@@ -1,7 +1,9 @@
 {
   "identifier": "settings",
   "description": "Local settings window",
-  "webviews": ["settings"],
+  "webviews": [
+    "settings"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
@@ -20,6 +22,9 @@
     "allow-remove-account",
     "allow-set-layout",
     "allow-open-account",
+    "allow-switch-account",
+    "allow-set-settings-placement",
+    "allow-close-settings",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"

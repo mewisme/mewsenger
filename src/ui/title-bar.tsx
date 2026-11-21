@@ -4,8 +4,10 @@ import { isTauri } from "@tauri-apps/api/core";
 import { Minus, Square, Copy, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import appIcon from "../../src-tauri/icons/32x32.png";
+import { AccountTabs } from "@/ui/account-tabs";
+import type { TabsView } from "@/ui/local-view";
 
-export function TitleBar() {
+export function TitleBar({ tabs = null }: { tabs?: TabsView | null }) {
   const window = useMemo(() => isTauri() ? getCurrentWindow() : null, []);
   const native = window !== null;
   const [maximized, setMaximized] = useState(false);
@@ -46,12 +48,20 @@ export function TitleBar() {
     <header aria-label="Window title bar"
       className="flex h-10 w-full select-none items-center border-b border-border bg-background text-foreground">
       <div aria-label="Drag Messenger window"
-        className="flex h-full min-w-0 flex-1 cursor-default items-center gap-2 px-3"
+        className={`flex h-full cursor-default items-center gap-2 px-3 ${tabs ? "shrink-0" : "min-w-0 flex-1"}`}
         onMouseDown={drag}
         onDoubleClick={toggleMaximize}>
         <img src={appIcon} alt="" aria-hidden="true" className="size-4 shrink-0" />
         <span className="truncate text-xs font-semibold">Messenger</span>
       </div>
+      {tabs && (
+        <>
+          <AccountTabs initial={tabs} />
+          <div aria-hidden="true" className="h-full min-w-4 flex-1 cursor-default"
+            onMouseDown={drag}
+            onDoubleClick={toggleMaximize} />
+        </>
+      )}
       <nav aria-label="Window controls" className="flex h-full shrink-0 items-stretch">
         <Button type="button" size="icon" variant="ghost" disabled={!native}
           aria-label="Minimize window" title="Minimize"

@@ -90,18 +90,25 @@
       return match ? match[1] : null;
     } catch { return null; }
   };
+  // Conversation rows carry the unread state: a visually hidden "unread"
+  // phrase in the row text and a bold (>= 600) snippet. The navigation links
+  // outside any row only report an aggregate over all chats and are ignored.
+  const heavyText = (row) => [...row.querySelectorAll('span,div')].some((el) =>
+    el.children.length === 0 && (el.textContent ?? '').trim() &&
+    Number.parseInt(getComputedStyle(el).fontWeight, 10) >= 600);
   const unreadThreads = () => {
     const ids = new Set();
     const links = document.querySelectorAll('a[href*="/t/"]');
     for (const a of links) {
       const id = threadFrom(a.href);
-      const row = a.closest('[role="row"],[role="listitem"],li') ?? a;
-      if (!id) continue;
+      const row = a.closest('[role="row"],[role="listitem"],li');
+      if (!id || !row) continue;
       const own = a.getAttribute('aria-label') ?? '';
       const label = row.getAttribute('aria-label') ?? '';
       const markers = [...row.querySelectorAll('[aria-label]')].some(
         (el) => unreadMarker.test(el.getAttribute('aria-label') ?? ''));
-      if (unreadMarker.test(own) || unreadMarker.test(label) || markers) ids.add(id);
+      if (unreadMarker.test(own) || unreadMarker.test(label) || markers ||
+          unreadMarker.test(row.textContent ?? '') || heavyText(row)) ids.add(id);
     }
     return [...ids];
   };

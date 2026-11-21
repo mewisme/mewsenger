@@ -41,13 +41,13 @@ test('local views receive exactly the commands they use', () => {
     'allow-get-update-state', 'allow-check-update', 'allow-install-update',
     'allow-get-diagnostics', 'allow-test-notification', 'allow-list-accounts',
     'allow-add-account', 'allow-rename-account', 'allow-remove-account',
-    'allow-set-layout', 'allow-open-account', 'autostart:allow-enable',
+    'allow-set-layout', 'allow-open-account', 'allow-switch-account',
+    'allow-set-settings-placement', 'allow-close-settings', 'autostart:allow-enable',
     'autostart:allow-disable', 'autostart:allow-is-enabled',
   ]);
   assert.deepEqual(byId('default').permissions, [
-    'core:default', 'allow-show-settings', 'allow-current-status',
-    'allow-reveal-last-download', 'allow-get-update-state', 'allow-check-update',
-    'allow-install-update',
+    'core:default', 'allow-show-settings', 'allow-reveal-last-download',
+    'allow-get-update-state', 'allow-check-update', 'allow-install-update',
   ]);
   assert.deepEqual(byId('split').webviews, ['split']);
   assert.deepEqual(byId('split').permissions, [
@@ -72,13 +72,19 @@ test('local views are granted by label pattern, one capability per kind', () => 
 
 test('account management and split layout commands reach only their own view', () => {
   const account = ['allow-list-accounts', 'allow-add-account', 'allow-rename-account',
-    'allow-remove-account', 'allow-set-layout', 'allow-open-account'];
+    'allow-remove-account', 'allow-set-layout', 'allow-open-account',
+    'allow-set-settings-placement', 'allow-close-settings'];
   for (const capability of capabilities) {
     const has = account.filter((permission) => capability.permissions.includes(permission));
     assert.deepEqual(has, capability.identifier === 'settings' ? account : [], capability.identifier);
     assert.equal(
       capability.permissions.includes('allow-set-split-layout'),
       capability.identifier === 'split',
+      capability.identifier,
+    );
+    assert.equal(
+      capability.permissions.includes('allow-switch-account'),
+      capability.identifier === 'settings' || capability.identifier === 'titlebar',
       capability.identifier,
     );
   }

@@ -6,6 +6,7 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { Button } from "@/components/ui/button";
 import appIcon from "../../src-tauri/icons/128x128.png";
 import { Switch } from "@/components/ui/switch";
+import { X } from "lucide-react";
 import { updateActionable, updateTooltip } from "@/ui/status-types";
 import { useUpdate } from "@/ui/use-update";
 
@@ -32,7 +33,7 @@ function Row({ id, label, hint, checked, disabled, onChange }: {
   );
 }
 
-export function Settings({ version }: { version: string }) {
+export function Settings({ version, overlay = false }: { version: string; overlay?: boolean }) {
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +106,15 @@ export function Settings({ version }: { version: string }) {
 
   return (
     <main className="flex h-screen w-full flex-col gap-5 overflow-auto bg-background px-6 py-5 text-foreground">
+      {overlay && (
+        <header className="-mt-1 flex items-center justify-between gap-4">
+          <h1 className="text-base font-semibold">Settings</h1>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Close settings"
+            onClick={() => { void invoke("close_settings").catch(() => {}); }}>
+            <X aria-hidden="true" />
+          </Button>
+        </header>
+      )}
       <section aria-labelledby="settings-notifications">
         <h2 id="settings-notifications" className="text-sm font-semibold">Notifications</h2>
         <Row

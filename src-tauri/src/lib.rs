@@ -67,7 +67,6 @@ pub fn run() {
         .manage(std::sync::Mutex::new(downloads::DownloadState::default()))
         .invoke_handler(tauri::generate_handler![
             notifications::notification_event,
-            notifications::current_status,
             notifications::test_notification,
             shell::show_settings,
             prefs::get_preferences,
@@ -83,7 +82,10 @@ pub fn run() {
             accounts::rename_account,
             accounts::remove_account,
             accounts::set_layout,
-            accounts::open_account
+            accounts::open_account,
+            accounts::switch_account,
+            accounts::set_settings_placement,
+            accounts::close_settings
         ])
         .on_window_event(|window, event| {
             desktop::on_window_event(window, event);
@@ -107,7 +109,11 @@ pub fn run() {
         .setup(|app| {
             appid::register(app.handle());
             app.manage(std::sync::Mutex::new(prefs::load(app.handle())));
-            app.manage(std::sync::Mutex::new(accounts::load(app.handle())));
+            let accounts_config = accounts::load(app.handle());
+            if let Ok(mut active) = app.state::<accounts::ActiveAccount>().0.lock() {
+                *active = accounts_config.shown_account().to_string();
+            }
+            app.manage(std::sync::Mutex::new(accounts_config));
             let updater_configured = updater::configured(app.handle());
             app.manage(std::sync::Mutex::new(updater::initial_state(
                 updater_configured,

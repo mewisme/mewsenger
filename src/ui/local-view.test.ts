@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { parseAccounts, parseSplit, resolveLocalView } from "./local-view";
+import { parseAccounts, parseOverlay, parseSplit, parseTabs, resolveLocalView } from "./local-view";
 
 test("routes local assets by their explicit URL rather than potentially shared runtime metadata", () => {
   expect(resolveLocalView("?view=status", "titlebar-a1")).toBe("status");
@@ -40,4 +40,20 @@ test("the split view takes account ids and a bounded ratio", () => {
   expect(parseSplit("?ratio=0.99&accounts=a1,a2").ratio).toBe(0.8);
   expect(parseSplit("?ratio=0.01&accounts=a1,a2").ratio).toBe(0.2);
   expect(parseSplit("?ratio=abc").ratio).toBe(0.5);
+});
+
+test("tabs need two listed accounts and fall back to the first when the active one is unknown", () => {
+  expect(parseTabs("?view=titlebar")).toBeNull();
+  expect(parseTabs("?accounts=a1%3AHome")).toBeNull();
+  expect(parseTabs("?accounts=a1%3AHome%2Ca2%3AWork&active=a2")).toEqual({
+    accounts: [{ id: "a1", name: "Home" }, { id: "a2", name: "Work" }],
+    active: "a2",
+  });
+  expect(parseTabs("?accounts=a1%3AHome%2Ca2%3AWork&active=a9")?.active).toBe("a1");
+});
+
+test("the overlay flag is explicit", () => {
+  expect(parseOverlay("?view=settings&overlay=1")).toBe(true);
+  expect(parseOverlay("?view=settings")).toBe(false);
+  expect(parseOverlay("?overlay=yes")).toBe(false);
 });

@@ -168,6 +168,8 @@ test("the test notification button reports the request outcome", async () => {
 const account = (id: string, name: string) => ({ id, name });
 const config = (names: string[], layout: LayoutMode = "windows"): AccountsConfig => ({
   layout,
+  settings: "window",
+  active: "a1",
   split_ratio: 0.5,
   next_id: names.length + 1,
   accounts: names.map((name, index) => account(`a${index + 1}`, name)),
@@ -261,15 +263,49 @@ test("layout choice is sent and split is unavailable beyond two accounts", async
   backend(config(["A", "B"]), (command) => (command === "set_layout" ? config(["A", "B"], "split") : undefined));
   const user = userEvent.setup();
   const { unmount } = render(<Settings version="0.1.14" />);
-  await user.click(await screen.findByRole("button", { name: "Split panes" }));
+  expect((await screen.findByRole("radio", { name: /Separate windows/ })).getAttribute("aria-checked")).toBe("true");
+  expect(screen.getByRole("radiogroup", { name: "Layout" })).toBeTruthy();
+  await user.click(screen.getByRole("radio", { name: /Split panes/ }));
   expect(mock.invoke).toHaveBeenCalledWith("set_layout", { layout: "split" });
-  await waitFor(() => expect(screen.getByRole("button", { name: "Split panes" }).getAttribute("aria-pressed")).toBe("true"));
+  await waitFor(() => expect(screen.getByRole("radio", { name: /Split panes/ }).getAttribute("aria-checked")).toBe("true"));
   unmount();
   backend(config(["A", "B", "C"]));
   render(<Settings version="0.1.14" />);
   await screen.findByLabelText("Name of C");
-  expect((screen.getByRole("button", { name: "Split panes" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("radio", { name: /Split panes/ }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText("Split supports up to 2 accounts")).toBeTruthy();
+});
+
+test("the single-window layout can be chosen with any number of accounts", async () => {
+  backend(config(["A", "B", "C", "D"]), (command) => (command === "set_layout" ? config(["A", "B", "C", "D"], "switch") : undefined));
+  const user = userEvent.setup();
+  render(<Settings version="0.1.14" />);
+  await user.click(await screen.findByRole("radio", { name: /Single window/ }));
+  expect(mock.invoke).toHaveBeenCalledWith("set_layout", { layout: "switch" });
+  await waitFor(() => expect(screen.getByRole("radio", { name: /Single window/ }).getAttribute("aria-checked")).toBe("true"));
+});
+
+test("in the single-window layout the shown account is marked and the others can be switched to", async () => {
+  backend({ ...config(["Home", "Work"], "switch"), active: "a2" }, (command) => (command === "open_account" ? null : undefined));
+  const user = userEvent.setup();
+  render(<Settings version="0.1.14" />);
+  expect(await screen.findByText("Showing")).toBeTruthy();
+  expect((screen.getByRole("button", { name: "Open Work" }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(screen.getByRole("button", { name: "Open Home" }));
+  expect(mock.invoke).toHaveBeenCalledWith("open_account", { id: "a1" });
+  expect(screen.getAllByRole("button", { name: /^Open / }).every((b) => b.textContent === "Switch")).toBe(true);
+});
+
+test("where settings open is chosen separately and applies next time", async () => {
+  backend(config(["Home", "Work"]), (command) =>
+    (command === "set_settings_placement" ? { ...config(["Home", "Work"]), settings: "overlay" } : undefined));
+  const user = userEvent.setup();
+  render(<Settings version="0.1.14" />);
+  expect((await screen.findByRole("radio", { name: /In a window/ })).getAttribute("aria-checked")).toBe("true");
+  await user.click(screen.getByRole("radio", { name: /Over the page/ }));
+  expect(mock.invoke).toHaveBeenCalledWith("set_settings_placement", { placement: "overlay" });
+  await waitFor(() => expect(screen.getByRole("radio", { name: /Over the page/ }).getAttribute("aria-checked")).toBe("true"));
+  expect(screen.getByText("Applies the next time settings open.")).toBeTruthy();
 });
 
 test("Open asks the backend to show that account and changes elsewhere refresh the list", async () => {

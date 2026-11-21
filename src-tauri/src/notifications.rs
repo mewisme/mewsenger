@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tauri::{AppHandle, Manager, State, Url, Webview};
 use tauri_plugin_notification::NotificationExt;
 
@@ -178,7 +178,13 @@ fn reply_target(registry: &Registry, id: i32, now: Instant) -> Option<(String, S
         .then(|| (toast.account.clone(), toast.thread.clone()))
 }
 
+/// True when nobody is looking at the account's page: its window is hidden or
+/// unfocused, or the single-window layout is showing another account.
 fn in_background(app: &AppHandle, account: &str) -> bool {
+    let config = crate::accounts::snapshot(app);
+    if config.is_switch() && config.shown_account() != account {
+        return true;
+    }
     crate::accounts::host_window(app, account).is_none_or(|window| {
         !window.is_visible().unwrap_or(true) || !window.is_focused().unwrap_or(true)
     })
@@ -292,17 +298,6 @@ fn quick_reply(app: &AppHandle, tag: &str, text: &str) {
     }
 }
 
-#[derive(Clone, Serialize)]
-pub struct DesktopStatus {
-    account: String,
-    unread_count: Option<usize>,
-    session: Option<bool>,
-}
-
-fn trusted_status_view(webview: &Webview) -> bool {
-    crate::shell::local_webview(webview, &[crate::shell::LocalKind::Status])
-}
-
 #[tauri::command]
 pub fn test_notification(app: AppHandle, webview: Webview) -> Result<(), String> {
     use crate::shell::LocalKind;
@@ -319,49 +314,6 @@ pub fn test_notification(app: AppHandle, webview: Webview) -> Result<(), String>
         false,
     )
     .map_err(|_| "Windows notification request failed".into())
-}
-
-fn publish_status(
-    app: &AppHandle,
-    account: &str,
-    unread_count: Option<usize>,
-    session: Option<bool>,
-) {
-    // Do not send thread IDs, notification bodies, or account data to local UI.
-    crate::shell::emit_status(
-        app,
-        "desktop-status",
-        DesktopStatus {
-            account: account.to_string(),
-            unread_count,
-            session,
-        },
-    );
-}
-
-#[tauri::command]
-pub fn current_status(
-    app: AppHandle,
-    webview: Webview,
-    registry: State<'_, Mutex<Registry>>,
-) -> Result<Vec<DesktopStatus>, String> {
-    if !trusted_status_view(&webview) {
-        return Err("local status view required".into());
-    }
-    let config = crate::accounts::snapshot(&app);
-    let registry = registry.lock().map_err(|_| "status unavailable")?;
-    Ok(config
-        .accounts
-        .iter()
-        .map(|account| {
-            let state = registry.get(&account.id);
-            DesktopStatus {
-                account: account.id.clone(),
-                unread_count: state.and_then(|s| s.unread),
-                session: state.and_then(|s| s.session),
-            }
-        })
-        .collect())
 }
 
 #[derive(Deserialize)]
@@ -558,7 +510,6 @@ pub fn notification_event(
         .map_err(|_| "notification state unavailable")?;
     registry.trim_pending(now);
     trim_history(registry.state(&account), now);
-    let mut status_change = false;
     let mut unread_change = false;
     match event {
         MessageEvent::Notify {
@@ -634,14 +585,10 @@ pub fn notification_event(
             if state.unread != Some(count) {
                 state.unread = Some(count);
                 unread_change = true;
-                status_change = true;
             }
         }
         MessageEvent::NewUnread { thread_id } => {
-            let window =
-                crate::accounts::host_window(&app, &account).ok_or("account window unavailable")?;
-            let in_background =
-                !window.is_visible().unwrap_or(true) || !window.is_focused().unwrap_or(true);
+            let in_background = in_background(&app, &account);
             if !should_show_background_unread(registry.state(&account), &thread_id, in_background) {
                 return Ok(());
             }
@@ -686,7 +633,6 @@ pub fn notification_event(
             reset_view_state(&mut registry, &account);
             toast::clear_account(&app, &account);
             unread_change = true;
-            status_change = true;
         }
         MessageEvent::ReplyResult { nonce, ok, reason } => {
             safe_string(&nonce, 160).ok_or("invalid reply id")?;
@@ -704,11 +650,7 @@ pub fn notification_event(
         }
         MessageEvent::Session { state } => {
             let signed_in = parse_session(&state)?;
-            let state = registry.state(&account);
-            if state.session != Some(signed_in) {
-                state.session = Some(signed_in);
-                status_change = true;
-            }
+            registry.state(&account).session = Some(signed_in);
         }
         MessageEvent::Focus => {
             if let Some(active) = app.try_state::<crate::accounts::ActiveAccount>() {
@@ -718,18 +660,11 @@ pub fn notification_event(
             }
         }
     }
-    let (unread, session) = {
-        let state = registry.state(&account);
-        (state.unread, state.session)
-    };
     let total = registry.total_unread();
     drop(registry);
     if unread_change {
         badge(&app, total);
         crate::desktop::set_tray_tooltip(&app, total);
-    }
-    if status_change {
-        publish_status(&app, &account, unread, session);
     }
     Ok(())
 }

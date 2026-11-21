@@ -20,14 +20,30 @@ pub struct Account {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Layout {
+    /// One window per account.
     Windows,
+    /// One window; the title bar switches which account it shows.
+    Switch,
+    /// All accounts side by side in one window.
     Split,
+}
+
+/// Where Settings opens: its own window, or over the main window's page.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsPlacement {
+    #[default]
+    Window,
+    Overlay,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Config {
     pub layout: Layout,
+    pub settings: SettingsPlacement,
+    /// Account shown by the switching layout; restored on the next start.
+    pub active: String,
     pub split_ratio: f64,
     pub next_id: u32,
     pub accounts: Vec<Account>,
@@ -37,6 +53,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             layout: Layout::Windows,
+            settings: SettingsPlacement::Window,
+            active: FIRST.into(),
             split_ratio: 0.5,
             next_id: 2,
             accounts: vec![Account {
@@ -71,6 +89,9 @@ pub fn from_json(text: &str) -> Config {
     config.split_ratio = clamp_ratio(config.split_ratio);
     if config.layout == Layout::Split && config.accounts.len() > MAX_SPLIT_ACCOUNTS {
         config.layout = Layout::Windows;
+    }
+    if config.account(&config.active).is_none() {
+        config.active = FIRST.to_string();
     }
     let floor = config
         .accounts
@@ -109,7 +130,7 @@ impl Config {
             id: id.clone(),
             name,
         });
-        if self.accounts.len() > MAX_SPLIT_ACCOUNTS {
+        if self.layout == Layout::Split && self.accounts.len() > MAX_SPLIT_ACCOUNTS {
             self.layout = Layout::Windows;
         }
         Ok(id)
@@ -136,6 +157,9 @@ impl Config {
             .position(|a| a.id == id)
             .ok_or("unknown account")?;
         self.accounts.remove(index);
+        if self.active == id {
+            self.active = FIRST.to_string();
+        }
         Ok(())
     }
 
@@ -158,6 +182,33 @@ impl Config {
     /// Split layout is only effective with two or more accounts.
     pub fn is_split(&self) -> bool {
         self.layout == Layout::Split && self.accounts.len() >= 2
+    }
+
+    /// Switching layout is only effective with two or more accounts.
+    pub fn is_switch(&self) -> bool {
+        self.layout == Layout::Switch && self.accounts.len() >= 2
+    }
+
+    /// All accounts live in the main window.
+    pub fn is_single_window(&self) -> bool {
+        self.is_split() || self.is_switch()
+    }
+
+    pub fn set_active(&mut self, id: &str) -> Result<(), String> {
+        if self.account(id).is_none() {
+            return Err("unknown account".into());
+        }
+        self.active = id.to_string();
+        Ok(())
+    }
+
+    /// Account the single-window switching layout shows.
+    pub fn shown_account(&self) -> &str {
+        if self.account(&self.active).is_some() {
+            &self.active
+        } else {
+            FIRST
+        }
     }
 }
 
@@ -272,19 +323,25 @@ impl Default for ActiveAccount {
 /// Window that shows an account: `main` in split layout, otherwise the
 /// account's own window.
 pub fn host_window(app: &AppHandle, account: &str) -> Option<tauri::Window> {
-    if snapshot(app).is_split() {
+    if snapshot(app).is_single_window() {
         app.get_window("main")
     } else {
         app.get_window(&window_label(account))
     }
 }
 
-/// Active account, or the first one when its page is gone.
+/// Account that tray actions target: the one on screen in the switching
+/// layout, otherwise the one whose page last reported focus. Falls back to
+/// the first account when that page is gone.
 pub fn active_account(app: &AppHandle) -> String {
-    let active = app
-        .try_state::<ActiveAccount>()
-        .and_then(|a| a.0.lock().ok().map(|a| a.clone()))
-        .unwrap_or_else(|| FIRST.to_string());
+    let config = snapshot(app);
+    let active = if config.is_switch() {
+        config.shown_account().to_string()
+    } else {
+        app.try_state::<ActiveAccount>()
+            .and_then(|a| a.0.lock().ok().map(|a| a.clone()))
+            .unwrap_or_else(|| FIRST.to_string())
+    };
     if app.get_webview(&remote_label(&active)).is_some() {
         active
     } else {
@@ -346,10 +403,68 @@ fn settings_view(webview: &tauri::Webview) -> Result<(), String> {
     }
 }
 
-/// Tells the settings window and every status bar that the list changed.
+/// Tells the settings view and every title bar that the configuration changed.
 fn announce(app: &AppHandle, config: &Config) {
-    crate::shell::emit_status(app, "accounts-changed", config);
-    let _ = app.emit_to("settings", "accounts-changed", config);
+    let _ = app.emit_filter("accounts-changed", config, |target| {
+        matches!(target, tauri::EventTarget::Webview { label }
+            if label == "settings" || label.starts_with("titlebar-"))
+    });
+}
+
+/// Makes `id` the account the switching layout shows and remembers it for the
+/// next start.
+pub fn switch_to(app: &AppHandle, id: &str) -> Result<Config, String> {
+    let (_, config) = mutate(app, |c| c.set_active(id))?;
+    if let Some(active) = app.try_state::<ActiveAccount>() {
+        if let Ok(mut active) = active.0.lock() {
+            *active = id.to_string();
+        }
+    }
+    announce(app, &config);
+    if config.is_switch() {
+        if let Some(window) = app.get_window("main") {
+            let _ = crate::shell::resize(&window);
+        }
+        if let Some(webview) = app.get_webview(&remote_label(id)) {
+            let _ = webview.set_focus();
+        }
+    }
+    Ok(config)
+}
+
+#[tauri::command]
+pub fn switch_account(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+) -> Result<Config, String> {
+    use crate::shell::{local_webview, LocalKind};
+    if !local_webview(&webview, &[LocalKind::Settings, LocalKind::Titlebar]) {
+        return Err("local view required".into());
+    }
+    switch_to(&app, &id)
+}
+
+#[tauri::command]
+pub fn set_settings_placement(
+    app: AppHandle,
+    webview: tauri::Webview,
+    placement: SettingsPlacement,
+) -> Result<Config, String> {
+    settings_view(&webview)?;
+    let (_, config) = mutate(&app, |c| {
+        c.settings = placement;
+        Ok(())
+    })?;
+    announce(&app, &config);
+    Ok(config)
+}
+
+#[tauri::command]
+pub fn close_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    settings_view(&webview)?;
+    crate::shell::close_settings(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -622,5 +737,47 @@ mod tests {
             String::from_utf8(bytes).unwrap(),
             "a2:Work%2C%20home%3A%20%C3%A9"
         );
+    }
+
+    #[test]
+    fn stored_files_from_before_switching_still_load() {
+        let config = from_json(
+            r#"{"layout":"split","split_ratio":0.6,"next_id":3,"accounts":[{"id":"a1","name":"Main"},{"id":"a2","name":"Second"}]}"#,
+        );
+        assert_eq!(config.layout, Layout::Split);
+        assert_eq!(config.active, "a1");
+        assert_eq!(config.settings, SettingsPlacement::Window);
+    }
+
+    #[test]
+    fn the_last_used_account_is_kept_until_it_is_removed() {
+        let mut config = Config::default();
+        config.add("Second").unwrap();
+        config.set_layout(Layout::Switch).unwrap();
+        assert!(config.set_active("a9").is_err());
+        config.set_active("a2").unwrap();
+        assert_eq!(config.shown_account(), "a2");
+        let again = from_json(&serde_json::to_string(&config).unwrap());
+        assert_eq!(again.shown_account(), "a2");
+        config.remove("a2").unwrap();
+        assert_eq!(config.shown_account(), "a1");
+        let mut stale = again;
+        stale.active = "a7".into();
+        assert_eq!(
+            from_json(&serde_json::to_string(&stale).unwrap()).active,
+            "a1"
+        );
+    }
+
+    #[test]
+    fn switching_needs_two_accounts_and_allows_four() {
+        let mut config = Config::default();
+        config.set_layout(Layout::Switch).unwrap();
+        assert!(!config.is_switch());
+        for n in 2..=4 {
+            config.add(&format!("Acc {n}")).unwrap();
+        }
+        assert!(config.is_switch() && config.is_single_window());
+        assert!(config.set_layout(Layout::Split).is_err());
     }
 }

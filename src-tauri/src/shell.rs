@@ -126,6 +126,10 @@ pub fn split_rects(width: f64, ratio: f64, panes: usize) -> Vec<(f64, f64)> {
     }
 }
 
+const SETTINGS: &str = "settings";
+/// Far enough left that a page placed there is not visible in any window.
+const OFFSCREEN_X: f64 = -30000.0;
+
 fn is_account_window(label: &str) -> bool {
     label == "main" || label.starts_with("acct-")
 }
@@ -152,13 +156,14 @@ pub fn resize(window: &Window) -> tauri::Result<()> {
     );
     let body_height = body_bottom - header;
     let split = views.iter().any(|v| v.label() == accounts::SPLIT);
+    let config = accounts::snapshot(&window.app_handle().clone());
+    let switching = window.label() == "main" && config.is_switch();
     if split && width + 0.5 < SPLIT_MIN_WIDTH {
         // The OS minimum can come out narrower than asked for on a frameless
         // window. Snap back; the resulting resize event lays the views out.
         return window.set_size(LogicalSize::new(SPLIT_MIN_WIDTH, height));
     }
     if split {
-        let config = accounts::snapshot(&window.app_handle().clone());
         let remotes = config
             .accounts
             .iter()
@@ -173,7 +178,12 @@ pub fn resize(window: &Window) -> tauri::Result<()> {
     for webview in views {
         let label = webview.label();
         if is_remote(label) {
-            if !split {
+            if switching {
+                let shown = label == accounts::remote_label(config.shown_account());
+                let x = if shown { 0.0 } else { OFFSCREEN_X };
+                webview.set_position(LogicalPosition::new(x, header))?;
+                webview.set_size(LogicalSize::new(width, body_height))?;
+            } else if !split {
                 webview.set_position(LogicalPosition::new(0.0, header))?;
                 webview.set_size(LogicalSize::new(width, body_height))?;
             }
@@ -188,7 +198,7 @@ pub fn resize(window: &Window) -> tauri::Result<()> {
                 webview.set_position(LogicalPosition::new(0.0, body_bottom))?;
                 webview.set_size(LogicalSize::new(width, (height - body_bottom).max(1.0)))?;
             }
-            Some(LocalKind::Split) => {
+            Some(LocalKind::Split | LocalKind::Settings) => {
                 webview.set_position(LogicalPosition::new(0.0, header))?;
                 webview.set_size(LogicalSize::new(width, body_height))?;
             }
@@ -225,9 +235,25 @@ fn local_builder(label: String, query: &str) -> WebviewBuilder<tauri::Wry> {
         .on_navigation(local_asset_url)
 }
 
-fn add_titlebar(window: &Window, account: &str, width: f64) -> tauri::Result<()> {
+fn add_titlebar(
+    window: &Window,
+    account: &str,
+    width: f64,
+    tabs: Option<&Config>,
+) -> tauri::Result<()> {
+    let query = match tabs {
+        Some(config) => {
+            let all = config.accounts.iter().collect::<Vec<_>>();
+            format!(
+                "view=titlebar&accounts={}&active={}",
+                accounts::accounts_param(&all),
+                config.shown_account()
+            )
+        }
+        None => "view=titlebar".to_string(),
+    };
     let header = window.add_child(
-        local_builder(accounts::titlebar_label(account), "view=titlebar"),
+        local_builder(accounts::titlebar_label(account), &query),
         LogicalPosition::new(0.0, 0.0),
         LogicalSize::new(width, HEADER_HEIGHT),
     );
@@ -239,14 +265,8 @@ fn add_titlebar(window: &Window, account: &str, width: f64) -> tauri::Result<()>
     Ok(())
 }
 
-fn add_status(
-    window: &Window,
-    account: &str,
-    shown: &[&Account],
-    width: f64,
-    height: f64,
-) -> tauri::Result<()> {
-    let query = format!("view=status&accounts={}", accounts::accounts_param(shown));
+fn add_status(window: &Window, account: &str, width: f64, height: f64) -> tauri::Result<()> {
+    let query = "view=status";
     let footer = window.add_child(
         local_builder(accounts::status_label(account), &query),
         LogicalPosition::new(0.0, (height - FOOTER_HEIGHT).max(1.0)),
@@ -272,8 +292,8 @@ fn mount_account(
         LogicalPosition::new(0.0, 0.0),
         LogicalSize::new(width, height),
     )?;
-    add_titlebar(window, &account.id, width)?;
-    add_status(window, &account.id, &[account], width, height)?;
+    add_titlebar(window, &account.id, width, None)?;
+    add_status(window, &account.id, width, height)?;
     resize(window)?;
     #[cfg(debug_assertions)]
     eprintln!("Messenger webviews mounted: {}", window.webviews().len());
@@ -294,7 +314,7 @@ fn mount_split(app: &AppHandle, window: &Window, config: &Config, show: bool) ->
     } else {
         (width, height)
     };
-    add_titlebar(window, accounts::FIRST, width)?;
+    add_titlebar(window, accounts::FIRST, width, None)?;
     let ids = config
         .accounts
         .iter()
@@ -314,8 +334,34 @@ fn mount_split(app: &AppHandle, window: &Window, config: &Config, show: bool) ->
             LogicalSize::new(PANE_MIN, height - HEADER_HEIGHT - FOOTER_HEIGHT),
         )?;
     }
-    let shown = config.accounts.iter().collect::<Vec<_>>();
-    add_status(window, accounts::FIRST, &shown, width, height)?;
+    add_status(window, accounts::FIRST, width, height)?;
+    resize(window)?;
+    if show {
+        window.show()?;
+    }
+    Ok(())
+}
+
+/// One window holding every account's page; the title bar tabs pick which
+/// one is on screen. The others stay mounted off screen so their pages keep
+/// running and can still raise notifications.
+fn mount_switch(
+    app: &AppHandle,
+    window: &Window,
+    config: &Config,
+    show: bool,
+) -> tauri::Result<()> {
+    window.set_min_size(Some(LogicalSize::new(MIN_WIDTH, MIN_HEIGHT)))?;
+    let (width, height) = bounds(window)?;
+    add_titlebar(window, accounts::FIRST, width, Some(config))?;
+    for account in &config.accounts {
+        window.add_child(
+            remote_builder(app, &account.id),
+            LogicalPosition::new(0.0, HEADER_HEIGHT),
+            LogicalSize::new(width, height - HEADER_HEIGHT - FOOTER_HEIGHT),
+        )?;
+    }
+    add_status(window, accounts::FIRST, width, height)?;
     resize(window)?;
     if show {
         window.show()?;
@@ -355,6 +401,7 @@ fn rebuild(app: &AppHandle, show_main: Option<bool>) -> tauri::Result<()> {
             window.destroy()?;
         }
     }
+    let overlay_open = settings_overlay(&main).is_some();
     for webview in main.webviews() {
         webview.close()?;
     }
@@ -368,26 +415,32 @@ fn rebuild(app: &AppHandle, show_main: Option<bool>) -> tauri::Result<()> {
 
     let show_main = show_main.unwrap_or_else(|| main.is_visible().unwrap_or(true));
     if config.is_split() {
-        return mount_split(app, &main, &config, show_main);
+        mount_split(app, &main, &config, show_main)?;
+    } else if config.is_switch() {
+        mount_switch(app, &main, &config, show_main)?;
+    } else {
+        main.set_min_size(Some(LogicalSize::new(MIN_WIDTH, MIN_HEIGHT)))?;
+        let first = &config.accounts[0];
+        mount_account(app, &main, first, show_main)?;
+        let mut windows = vec![main.clone()];
+        for account in config.accounts.iter().skip(1) {
+            let label = accounts::window_label(&account.id);
+            let window = WindowBuilder::new(app, &label)
+                .title(format!("Messenger - {}", account.name))
+                .inner_size(MIN_WIDTH, MIN_HEIGHT)
+                .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
+                .decorations(false)
+                .visible(false)
+                .center()
+                .build()?;
+            mount_account(app, &window, account, reopen.contains(&label))?;
+            windows.push(window);
+        }
+        arrange_windows(&main, &windows);
     }
-    main.set_min_size(Some(LogicalSize::new(MIN_WIDTH, MIN_HEIGHT)))?;
-    let first = &config.accounts[0];
-    mount_account(app, &main, first, show_main)?;
-    let mut windows = vec![main.clone()];
-    for account in config.accounts.iter().skip(1) {
-        let label = accounts::window_label(&account.id);
-        let window = WindowBuilder::new(app, &label)
-            .title(format!("Messenger - {}", account.name))
-            .inner_size(MIN_WIDTH, MIN_HEIGHT)
-            .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
-            .decorations(false)
-            .visible(false)
-            .center()
-            .build()?;
-        mount_account(app, &window, account, reopen.contains(&label))?;
-        windows.push(window);
+    if overlay_open {
+        add_settings_overlay(&main)?;
     }
-    arrange_windows(&main, &windows);
     Ok(())
 }
 
@@ -519,6 +572,21 @@ impl Drop for SettingsOpening {
     }
 }
 
+/// Settings drawn over `window`, if any. Looked up among the window's own
+/// views: the app-wide label lookup would also find a settings window.
+fn settings_overlay(window: &Window) -> Option<tauri::Webview> {
+    window
+        .webviews()
+        .into_iter()
+        .find(|v| v.label() == SETTINGS)
+}
+
+/// The separate settings window, if open.
+fn settings_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.get_window(SETTINGS)?;
+    app.get_webview_window(SETTINGS)
+}
+
 #[tauri::command]
 pub fn show_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
     if !local_webview(&webview, &[LocalKind::Status]) {
@@ -529,10 +597,27 @@ pub fn show_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), Stri
 }
 
 pub fn open_settings(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+    if accounts::snapshot(app).settings == accounts::SettingsPlacement::Overlay {
+        open_settings_overlay(app);
+    } else {
+        open_settings_window(app);
+    }
+}
+
+fn focus_window(window: &tauri::WebviewWindow) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
+/// Settings in its own window.
+fn open_settings_window(app: &AppHandle) {
+    if let Some(window) = settings_window(app) {
+        focus_window(&window);
+        return;
+    }
+    if let Some(overlay) = app.get_window("main").as_ref().and_then(settings_overlay) {
+        let _ = overlay.set_focus();
         return;
     }
     // WebView2 window creation from a synchronous callback can block the
@@ -543,14 +628,13 @@ pub fn open_settings(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         let _opening = SettingsOpening;
-        if let Some(window) = app.get_webview_window("settings") {
-            let _ = window.show();
-            let _ = window.set_focus();
+        if let Some(window) = settings_window(&app) {
+            focus_window(&window);
             return;
         }
         match tauri::WebviewWindowBuilder::new(
             &app,
-            "settings",
+            SETTINGS,
             WebviewUrl::App("index.html?view=settings".into()),
         )
         .on_navigation(local_asset_url)
@@ -562,11 +646,57 @@ pub fn open_settings(app: &AppHandle) {
         .center()
         .build()
         {
-            Ok(window) => {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            Ok(window) => focus_window(&window),
             Err(error) => eprintln!("could not open settings: {error}"),
+        }
+    });
+}
+
+/// Settings drawn over the main window's page, between title bar and footer.
+fn add_settings_overlay(window: &Window) -> tauri::Result<()> {
+    let (width, height) = bounds(window)?;
+    window.add_child(
+        local_builder(SETTINGS.to_string(), "view=settings&overlay=1"),
+        LogicalPosition::new(0.0, HEADER_HEIGHT),
+        LogicalSize::new(width, (height - HEADER_HEIGHT - FOOTER_HEIGHT).max(1.0)),
+    )?;
+    resize(window)
+}
+
+fn open_settings_overlay(app: &AppHandle) {
+    if let Some(window) = settings_window(app) {
+        focus_window(&window);
+        return;
+    }
+    crate::desktop::show_main(app);
+    let Some(main) = app.get_window("main") else {
+        return;
+    };
+    if let Some(overlay) = settings_overlay(&main) {
+        let _ = overlay.set_focus();
+        return;
+    }
+    if SETTINGS_OPENING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let _opening = SettingsOpening;
+        if settings_overlay(&main).is_none() {
+            if let Err(error) = add_settings_overlay(&main) {
+                eprintln!("could not open settings: {error}");
+            }
+        }
+    });
+}
+
+/// Closes Settings, whichever way it is open.
+pub fn close_settings(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Some(overlay) = app.get_window("main").as_ref().and_then(settings_overlay) {
+            let _ = overlay.close();
+        } else if let Some(window) = settings_window(&app) {
+            let _ = window.close();
         }
     });
 }

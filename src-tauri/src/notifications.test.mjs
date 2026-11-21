@@ -69,6 +69,7 @@ function createPage({
     },
     setTimeout(cb) { timers.push(cb); },
     Math, Promise, Reflect,
+    getComputedStyle: (el) => ({ fontWeight: String(el.weight ?? 400) }),
     KeyboardEvent: class {
       constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
     },
@@ -82,15 +83,17 @@ function createPage({
         timers.shift()();
       }
     },
-    addThread(id, label) {
+    addThread(id, label, { weight, rowless = false } = {}) {
+      const leaves = weight ? [{ children: { length: 0 }, textContent: 'snippet', weight }] : [];
       const row = {
         getAttribute(name) { return name === 'aria-label' ? label : null; },
-        querySelectorAll() { return []; },
+        querySelectorAll(selector) { return selector === 'span,div' ? leaves : []; },
+        textContent: '',
       };
       const anchor = {
         href: threadBase + id,
         getAttribute(name) { return name === 'aria-label' ? '' : null; },
-        closest() { return row; },
+        closest() { return rowless ? null : row; },
       };
       rows.push({ row, anchor });
     },
@@ -142,6 +145,23 @@ test('unread badge counts unique conversations with explicit unread markers only
   const last = p.events.at(-1);
   assert.equal(last.event.kind, 'unread');
   assert.equal(last.event.threads.length, 0);
+});
+
+test('a bold snippet marks a row unread without any localized phrase', () => {
+  const p = createPage();
+  p.addThread('a', 'Alice', { weight: 700 });
+  p.addThread('b', 'Bob', { weight: 400 });
+  p.flush();
+  const unread = p.events.find((e) => e.event.kind === 'unread');
+  assert.deepEqual([...unread.event.threads], ['a']);
+});
+
+test('aggregate navigation links outside a conversation row never mark a thread unread', () => {
+  const p = createPage();
+  p.addThread('a', 'Chats · 2 unread messages', { rowless: true });
+  p.addThread('b', 'Bob');
+  p.flush();
+  assert.equal(p.events.some((e) => e.event.kind === 'unread' && e.event.threads.length > 0), false);
 });
 
 test('does not invent nonzero unread counts if Messenger has no recognizable markers', () => {
@@ -304,9 +324,8 @@ test('only the scoped Messenger command is granted to remote content', () => {
   assert.deepEqual(local.webviews, ['status-*']);
   assert.equal(local.windows, undefined);
   assert.deepEqual(local.permissions, [
-    'core:default', 'allow-show-settings', 'allow-current-status',
-    'allow-reveal-last-download', 'allow-get-update-state', 'allow-check-update',
-    'allow-install-update',
+    'core:default', 'allow-show-settings', 'allow-reveal-last-download',
+    'allow-get-update-state', 'allow-check-update', 'allow-install-update',
   ]);
   const desktop = JSON.parse(fs.readFileSync(
     new URL('../capabilities/desktop.json', import.meta.url), 'utf8'));

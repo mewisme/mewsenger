@@ -57,3 +57,26 @@ export function parseSplit(search: string): { ids: string[]; ratio: number } {
     ratio: Number.isFinite(ratio) && ratio > 0 ? Math.min(0.8, Math.max(0.2, ratio)) : 0.5,
   };
 }
+
+export interface TabsView {
+  accounts: AccountRef[];
+  active: string;
+}
+
+/**
+ * Account tabs of the single-window title bar (`?accounts=…&active=a2`); null
+ * unless at least two accounts are listed.
+ */
+export function parseTabs(search: string): TabsView | null {
+  const params = new URLSearchParams(search);
+  if (!params.get("accounts")) return null;
+  const accounts = parseAccounts(search);
+  if (accounts.length < 2) return null;
+  const active = params.get("active") ?? "";
+  return { accounts, active: accounts.some((a) => a.id === active) ? active : accounts[0].id };
+}
+
+/** True when settings are drawn over the main window (`?overlay=1`). */
+export function parseOverlay(search: string): boolean {
+  return new URLSearchParams(search).get("overlay") === "1";
+}

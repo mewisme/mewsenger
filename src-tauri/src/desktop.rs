@@ -57,8 +57,13 @@ pub(crate) fn show_main(app: &AppHandle) {
     }
 }
 
-/// Brings the window that hosts `account` to the front.
+/// Brings the window that hosts `account` to the front; in the switching
+/// layout that window starts showing `account`.
 pub(crate) fn show_account(app: &AppHandle, account: &str) {
+    let config = accounts::snapshot(app);
+    if config.is_switch() && config.shown_account() != account {
+        let _ = accounts::switch_to(app, account);
+    }
     match accounts::host_window(app, account) {
         Some(window) => show_window(&window),
         None => show_main(app),
@@ -87,14 +92,14 @@ fn hide_all(app: &AppHandle) {
     }
 }
 
-/// Opens an account's window, or focuses its pane in split layout.
+/// Opens an account's window, or focuses its pane in a single-window layout.
 pub(crate) fn open_account(app: &AppHandle, account: &str) {
     let config = accounts::snapshot(app);
     if config.account(account).is_none() {
         return;
     }
     show_account(app, account);
-    if config.is_split() {
+    if config.is_single_window() {
         if let Some(webview) = app.get_webview(&accounts::remote_label(account)) {
             let _ = webview.set_focus();
         }
