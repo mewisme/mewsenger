@@ -62,7 +62,7 @@ export function StatusBar({
                   <Download aria-hidden="true" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="top">{downloadTooltip(download)}</TooltipContent>
+              <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">{downloadTooltip(download)}</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
@@ -73,7 +73,7 @@ export function StatusBar({
                 <Bell aria-hidden="true" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">
+            <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">
               {notificationTestStatus ?? "Send a test notification to the operating system"}
             </TooltipContent>
           </Tooltip>
@@ -89,7 +89,7 @@ export function StatusBar({
                 <RefreshCcw aria-hidden="true" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">{updateTooltip(update)}</TooltipContent>
+            <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">{updateTooltip(update)}</TooltipContent>
           </Tooltip>
           <Separator orientation="vertical" className="h-3" />
           <span aria-label="Application version" className="tabular-nums">{version}</span>
@@ -100,7 +100,7 @@ export function StatusBar({
                   <Settings aria-hidden="true" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="top">Settings</TooltipContent>
+              <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">Settings</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
@@ -109,7 +109,7 @@ export function StatusBar({
                 <Info aria-hidden="true" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">Credits</TooltipContent>
+            <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">Credits</TooltipContent>
           </Tooltip>
         </div>
       </footer>
