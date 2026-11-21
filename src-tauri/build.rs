@@ -19,6 +19,8 @@ fn main() {
             "remove_account",
             "open_account",
             "close_tab",
+            "move_tab",
+            "tab_shortcut",
             "open_tab_menu",
             "close_tab_menu",
         ]),

@@ -11,7 +11,7 @@ use tauri::{
 };
 
 use crate::accounts::{self, Config};
-use crate::{open_popup, DESKTOP_SCRIPT, LINK_SCRIPT, NOTIFICATIONS_SCRIPT};
+use crate::{open_popup, INJECT_SCRIPTS};
 
 const HEADER_HEIGHT: f64 = 40.0;
 const FOOTER_HEIGHT: f64 = 36.0;
@@ -170,10 +170,10 @@ fn remote_builder(app: &AppHandle, account: &str) -> WebviewBuilder<tauri::Wry> 
     let navigation_app = app.clone();
     let popup_app = app.clone();
     let builder = WebviewBuilder::new(accounts::remote_label(account), WebviewUrl::External(url))
-        .initialization_script(crate::site::current().prelude())
-        .initialization_script(LINK_SCRIPT)
-        .initialization_script(DESKTOP_SCRIPT)
-        .initialization_script(NOTIFICATIONS_SCRIPT)
+        .initialization_script(crate::site::current().prelude());
+    let builder = INJECT_SCRIPTS
+        .iter()
+        .fold(builder, |builder, script| builder.initialization_script(*script))
         .on_navigation(move |url| crate::links::allow_navigation(&navigation_app, url))
         .on_new_window(move |url, features| open_popup(&popup_app, url, features))
         .on_download(crate::downloads::handler(app.clone()));

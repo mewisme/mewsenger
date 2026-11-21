@@ -4,7 +4,7 @@ import { test } from 'vitest';
 import vm from 'node:vm';
 import { site, facebookSite } from './site-fixture.mjs';
 
-const script = readFileSync(new URL('./links.js', import.meta.url), 'utf8');
+const script = readFileSync(new URL('./inject/10-links.js', import.meta.url), 'utf8');
 
 function click(href, {
   button = 0, download = false, ctrlKey = false, metaKey = false,

@@ -79,7 +79,7 @@ test('account and tab commands reach only the views that use them', () => {
   const tabViews = ['allow-open-account', 'allow-add-account'];
   const allowed = {
     settings: [...settingsOnly, ...tabViews],
-    titlebar: [...tabViews, 'allow-close-tab', 'allow-open-tab-menu'],
+    titlebar: [...tabViews, 'allow-close-tab', 'allow-open-tab-menu', 'allow-move-tab', 'allow-tab-shortcut'],
     tabmenu: [...tabViews, 'allow-close-tab-menu'],
   };
   const tracked = [...new Set(Object.values(allowed).flat())];
@@ -90,8 +90,8 @@ test('account and tab commands reach only the views that use them', () => {
 });
 
 test('injected page scripts never wrap network primitives', () => {
-  for (const name of ['links.js', 'desktop.js', 'notifications.js']) {
-    const source = fs.readFileSync(new URL(name, import.meta.url), 'utf8');
+  for (const name of ['10-links.js', '20-desktop.js', '30-notifications.js']) {
+    const source = fs.readFileSync(new URL(`inject/${name}`, import.meta.url), 'utf8');
     assert.ok(!/WebSocket|XMLHttpRequest|\bfetch\s*=|\.fetch\b/.test(source), `${name} touches network primitives`);
   }
 });

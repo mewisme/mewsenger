@@ -191,6 +191,18 @@ impl Config {
         Ok(())
     }
 
+    /// Moves a tab so it ends at `index` (clamped) in the tab order.
+    pub fn move_tab(&mut self, id: &str, index: usize) -> Result<(), String> {
+        let from = self
+            .open
+            .iter()
+            .position(|open| open == id)
+            .ok_or("tab is not open")?;
+        let tab = self.open.remove(from);
+        self.open.insert(index.min(self.open.len()), tab);
+        Ok(())
+    }
+
     /// Closes a tab, never the last one. The neighbour takes over when the
     /// active tab closes.
     pub fn close_tab(&mut self, id: &str) -> Result<(), String> {
@@ -443,16 +455,71 @@ pub fn open_account(app: AppHandle, webview: tauri::Webview, id: String) -> Resu
 }
 
 /// Closes the tab only: the account, its login and its data stay.
-#[tauri::command]
-pub fn close_tab(app: AppHandle, webview: tauri::Webview, id: String) -> Result<Config, String> {
-    view_of(&webview, &[crate::shell::LocalKind::Titlebar])?;
-    let (_, config) = mutate(&app, |c| c.close_tab(&id))?;
-    announce(&app, &config);
+fn close(app: &AppHandle, id: &str) -> Result<Config, String> {
+    let (_, config) = mutate(app, |c| c.close_tab(id))?;
+    announce(app, &config);
     let cleanup_app = app.clone();
-    crate::shell::sync_tabs(&app, move || {
+    let id = id.to_string();
+    crate::shell::sync_tabs(app, move || {
         crate::notifications::account_closed(&cleanup_app, &id);
     });
     Ok(config)
+}
+
+#[tauri::command]
+pub fn close_tab(app: AppHandle, webview: tauri::Webview, id: String) -> Result<Config, String> {
+    view_of(&webview, &[crate::shell::LocalKind::Titlebar])?;
+    close(&app, &id)
+}
+
+/// Reorders the tab strip; only the order changes, no page is touched.
+#[tauri::command]
+pub fn move_tab(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+    index: usize,
+) -> Result<Config, String> {
+    view_of(&webview, &[crate::shell::LocalKind::Titlebar])?;
+    let (_, config) = mutate(&app, |c| c.move_tab(&id, index))?;
+    announce(&app, &config);
+    Ok(config)
+}
+
+/// Ctrl+T, Ctrl+W and Ctrl+Tab, from the tab strip or from the page in focus.
+pub fn shortcut(app: &AppHandle, action: &str) -> Result<(), String> {
+    let config = snapshot(app);
+    let position = config
+        .open
+        .iter()
+        .position(|id| id == config.shown_account())
+        .unwrap_or(0);
+    let count = config.open.len();
+    match action {
+        "new" => {
+            let _ = app.emit_filter("tab-shortcut", serde_json::json!({ "action": "new" }), |target| {
+                matches!(target, tauri::EventTarget::Webview { label } if label.starts_with("titlebar-"))
+            });
+            Ok(())
+        }
+        "close" => close(app, config.shown_account()).map(|_| ()),
+        "next" | "prev" if count > 1 => {
+            let target = if action == "next" {
+                (position + 1) % count
+            } else {
+                (position + count - 1) % count
+            };
+            activate(app, &config.open[target]).map(|_| ())
+        }
+        "next" | "prev" => Ok(()),
+        _ => Err("unknown shortcut".into()),
+    }
+}
+
+#[tauri::command]
+pub fn tab_shortcut(app: AppHandle, webview: tauri::Webview, action: String) -> Result<(), String> {
+    view_of(&webview, &[crate::shell::LocalKind::Titlebar])?;
+    shortcut(&app, &action)
 }
 
 /// Opens or closes the account dropdown below the "+" button at `x`.
@@ -583,6 +650,23 @@ mod tests {
         // Closing a background tab leaves the shown one alone.
         config.close_tab("a1").unwrap();
         assert_eq!(config.shown_account(), "a3");
+    }
+
+    #[test]
+    fn moving_a_tab_changes_the_order_only() {
+        let mut config = two();
+        config.add("Third").unwrap();
+        let active = config.shown_account().to_string();
+        config.move_tab("a3", 0).unwrap();
+        assert_eq!(config.open, vec!["a3", "a1", "a2"]);
+        config.move_tab("a3", 99).unwrap();
+        assert_eq!(config.open, vec!["a1", "a2", "a3"]);
+        config.move_tab("a1", 1).unwrap();
+        assert_eq!(config.open, vec!["a2", "a1", "a3"]);
+        assert_eq!(config.shown_account(), active);
+        assert!(config.move_tab("a9", 0).is_err());
+        config.close_tab("a2").unwrap();
+        assert!(config.move_tab("a2", 0).is_err());
     }
 
     #[test]

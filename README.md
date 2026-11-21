@@ -28,7 +28,7 @@ Tauri's native multi-WebView support requires the Rust `unstable` feature on des
 ## Desktop controls
 
 - **Photo viewer:** Ctrl + mouse wheel (trackpad pinch in WebView2) to zoom, double-click a photo to toggle zoom, then scroll or drag the enlarged photo. Zoom resets when the viewer/photo changes.
-- **Chats:** Ctrl+K focuses Messenger search; Ctrl+Shift+N opens Messenger's new-message control if present; Ctrl+Alt+Up/Down moves between chats when not editing text. Ctrl+1 to Ctrl+9 opens the Nth chat in the list; Ctrl+Shift+] / Ctrl+Shift+[ (and Ctrl+Tab / Ctrl+Shift+Tab) move to the next / previous chat. These are ignored while another text field has focus. On macOS, use Command in place of Ctrl.
+- **Chats:** Ctrl+K focuses Messenger search; Ctrl+Shift+N opens Messenger's new-message control if present; Ctrl+Alt+Up/Down moves between chats when not editing text. Ctrl+1 to Ctrl+9 opens the Nth chat in the list; Ctrl+Shift+] / Ctrl+Shift+[ move to the next / previous chat. These are ignored while another text field has focus. On macOS, use Command in place of Ctrl.
 - **Account:** use **Account menu** or **Sign out** from the native tray menu. These actions use Messenger's own controls and may be unavailable when Messenger changes its page layout.
 - **Window:** drag the custom top bar to move the main window, or double-click it to maximize/restore. The window buttons minimize, maximize/restore, and close. Closing the main window hides it to the system tray when available. Double-click the tray icon, or select **Show Messenger**, to restore it. Select **Quit** to exit the process. If the tray is unavailable, closing the window exits normally.
 - **Navigation:** the tray menu provides Back, Forward, Reload and photo zoom controls. External links open in the default browser without Facebook fbclid tracking.
@@ -39,7 +39,7 @@ Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, n
 
 Run up to four Messenger accounts at once.
 
-- **Tabs:** accounts are browser-style tabs in the title bar, named after the account. Click a tab to switch, the x to close it (the account, its login and its data stay), and + to open a closed account or sign in to a new one. The last tab cannot be closed. Open tabs keep running, so notifications still arrive for accounts that are not on screen; a closed tab stops running. Open tabs and the tab you used last are restored on the next start.
+- **Tabs:** accounts are browser-style tabs in the title bar, named after the account. Click a tab to switch, the x to close it (the account, its login and its data stay), and + to open a closed account or sign in to a new one. Drag a tab to reorder. Ctrl+T opens the account menu, Ctrl+W closes the current tab, Ctrl+Tab / Ctrl+Shift+Tab switch tabs (these also work while Messenger has focus). The last tab cannot be closed. Open tabs keep running, so notifications still arrive for accounts that are not on screen; a closed tab stops running. Open tabs and the tab you used last are restored on the next start.
 - **Settings:** open in their own window or over the main window's page (Settings > Open settings; applies the next time they open). Removing an account in Settings is the only way to delete its data.
 - **Data:** the first account keeps the existing login. Others store their profile in `accounts/<id>` under the app's local data folder; removing an account deletes it.
 - **Notifications:** toasts, unread counts and the tray tooltip are tracked per account; the badge and tooltip show the total.

@@ -19,9 +19,13 @@ use tauri::{
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
-const LINK_SCRIPT: &str = include_str!("links.js");
-const DESKTOP_SCRIPT: &str = include_str!("desktop.js");
-const NOTIFICATIONS_SCRIPT: &str = include_str!("notifications.js");
+/// Page scripts, run in file-name order after the site prelude. Numbers leave
+/// room to slot new parts between existing ones.
+pub(crate) const INJECT_SCRIPTS: [&str; 3] = [
+    include_str!("inject/10-links.js"),
+    include_str!("inject/20-desktop.js"),
+    include_str!("inject/30-notifications.js"),
+];
 
 fn open_popup<R: Runtime>(
     app: &AppHandle<R>,
@@ -40,10 +44,10 @@ fn open_popup<R: Runtime>(
     let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
         .title("Messenger")
         .window_features(features)
-        .initialization_script(site::current().prelude())
-        .initialization_script(LINK_SCRIPT)
-        .initialization_script(DESKTOP_SCRIPT)
-        .initialization_script(NOTIFICATIONS_SCRIPT)
+        .initialization_script(site::current().prelude());
+    let builder = INJECT_SCRIPTS
+        .iter()
+        .fold(builder, |builder, script| builder.initialization_script(*script))
         .on_navigation(move |url| links::allow_navigation(&navigation_app, url))
         .on_new_window(move |url, features| open_popup(&popup_app, url, features))
         .on_download(downloads::handler(app.clone()));
@@ -81,6 +85,8 @@ pub fn run() {
             accounts::remove_account,
             accounts::open_account,
             accounts::close_tab,
+            accounts::move_tab,
+            accounts::tab_shortcut,
             accounts::open_tab_menu,
             accounts::close_tab_menu,
             accounts::set_settings_placement,

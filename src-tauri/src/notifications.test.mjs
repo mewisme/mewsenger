@@ -4,7 +4,7 @@ import { test } from 'vitest';
 import vm from 'node:vm';
 import { site, facebookSite } from './site-fixture.mjs';
 
-const script = fs.readFileSync(new URL('./notifications.js', import.meta.url), 'utf8');
+const script = fs.readFileSync(new URL('./inject/30-notifications.js', import.meta.url), 'utf8');
 
 function createPage({
   url = 'https://www.messenger.com/t/1',
@@ -482,4 +482,49 @@ test('quick reply rejects malformed requests without queueing them', () => {
   assert.equal(p.window.__mewQuickReply({ thread: '1', text: 'x'.repeat(2001), nonce: 'n' }), false);
   assert.equal(p.window.__mewQuickReply({ thread: '', text: 'x', nonce: 'n' }), false);
   assert.equal(p.window.__mewQuickReply(null), false);
+});
+
+function pressKey(p, init) {
+  const event = {
+    defaultPrevented: false,
+    stopped: false,
+    preventDefault() { this.defaultPrevented = true; },
+    stopPropagation() { this.stopped = true; },
+    ...init,
+  };
+  p.handlers.get('document:keydown')(event);
+  return event;
+}
+
+const shortcuts = (p) => p.events.filter(({ event }) => event.kind === 'shortcut').map(({ event }) => event.action);
+
+test('tab shortcuts are forwarded to the shell and kept from the page', () => {
+  const p = createPage();
+  p.events.length = 0;
+  const open = pressKey(p, { key: 't', ctrlKey: true });
+  pressKey(p, { key: 'w', ctrlKey: true });
+  pressKey(p, { key: 'Tab', ctrlKey: true });
+  pressKey(p, { key: 'Tab', ctrlKey: true, shiftKey: true });
+  assert.deepEqual(shortcuts(p), ['new', 'close', 'next', 'prev']);
+  assert.equal(open.defaultPrevented, true);
+  assert.equal(open.stopped, true);
+});
+
+test('other keys, repeats, IME and modified combinations are not tab shortcuts', () => {
+  const p = createPage();
+  p.events.length = 0;
+  for (const init of [
+    { key: 't' },
+    { key: 'T', ctrlKey: true, shiftKey: true },
+    { key: 'w', ctrlKey: true, repeat: true },
+    { key: 't', ctrlKey: true, isComposing: true },
+    { key: 'w', ctrlKey: true, altKey: true },
+    { key: 'w', ctrlKey: true, metaKey: true },
+    { key: 'k', ctrlKey: true },
+    { key: 'w', ctrlKey: true, defaultPrevented: true },
+  ]) {
+    const event = pressKey(p, init);
+    assert.equal(event.stopped, false, JSON.stringify(init));
+  }
+  assert.deepEqual(shortcuts(p), []);
 });

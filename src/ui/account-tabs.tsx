@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { AccountRef, TabsView } from "@/ui/local-view";
 
 interface ConfigPayload {
@@ -19,35 +20,136 @@ function isPayload(value: unknown): value is ConfigPayload {
     typeof payload.active === "string";
 }
 
+const DRAG_THRESHOLD = 5;
+
+interface TabRect {
+  id: string;
+  left: number;
+  width: number;
+}
+
+interface DragState {
+  id: string;
+  pointerId: number;
+  startX: number;
+  started: boolean;
+  rects: TabRect[];
+  origin: number;
+  target: number;
+  shift: number;
+  holder: HTMLElement;
+}
+
+interface DragView {
+  id: string;
+  offset: number;
+  origin: number;
+  target: number;
+  shift: number;
+}
+
+function isShortcutAction(value: unknown): value is { action: string } {
+  const payload = value as { action?: unknown } | null;
+  return typeof payload === "object" && payload !== null && typeof payload.action === "string";
+}
+
+function moved(order: string[], from: number, to: number): string[] {
+  const next = order.slice();
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+
+function translation(index: number, drag: DragView | null): string | undefined {
+  if (!drag) return undefined;
+  if (index === drag.origin) return `translateX(${drag.offset}px)`;
+  if (drag.origin < drag.target && index > drag.origin && index <= drag.target) return `translateX(${-drag.shift}px)`;
+  if (drag.target < drag.origin && index >= drag.target && index < drag.origin) return `translateX(${drag.shift}px)`;
+  return undefined;
+}
+
 /** Browser-style tab strip: one tab per open account plus the new-tab button. */
 export function AccountTabs({ initial }: { initial: TabsView }) {
   const [view, setView] = useState<TabsView>(initial);
+  const [order, setOrder] = useState<string[] | null>(null);
+  const [dragView, setDragView] = useState<DragView | null>(null);
   const plus = useRef<HTMLButtonElement>(null);
+  const holders = useRef(new Map<string, HTMLElement>());
+  const drag = useRef<DragState | null>(null);
+  const suppressClick = useRef(false);
+
+  function openMenu() {
+    const left = plus.current?.getBoundingClientRect().left ?? 0;
+    void invoke("open_tab_menu", { x: left }).catch(() => {});
+  }
+  const openMenuRef = useRef(openMenu);
+  openMenuRef.current = openMenu;
+
+  function cancelDrag() {
+    const current = drag.current;
+    if (!current) return;
+    drag.current = null;
+    if (current.started) {
+      suppressClick.current = true;
+      try { current.holder.releasePointerCapture(current.pointerId); } catch { /* Capture already gone. */ }
+    }
+    setDragView(null);
+  }
+  const cancelRef = useRef(cancelDrag);
+  cancelRef.current = cancelDrag;
 
   useEffect(() => {
     let active = true;
-    let detach: (() => void) | undefined;
-    void listen<ConfigPayload>("accounts-changed", (event) => {
-      if (active && isPayload(event.payload)) {
-        const { accounts, open, active: current } = event.payload;
-        setView({ accounts, open, active: current });
-      }
-    }).then((unlisten) => {
-      if (active) detach = unlisten;
-      else unlisten();
-    }).catch(() => { /* Tabs keep the state they were created with. */ });
+    const detach: (() => void)[] = [];
+    function subscribe(name: string, handler: (payload: unknown) => void) {
+      void listen<unknown>(name, (event) => { if (active) handler(event.payload); })
+        .then((unlisten) => {
+          if (active) detach.push(unlisten);
+          else unlisten();
+        }).catch(() => { /* Tabs keep the state they were created with. */ });
+    }
+    subscribe("accounts-changed", (payload) => {
+      if (!isPayload(payload)) return;
+      cancelRef.current();
+      setOrder(null);
+      setView({ accounts: payload.accounts, open: payload.open, active: payload.active });
+    });
+    subscribe("tab-shortcut", (payload) => {
+      if (isShortcutAction(payload) && payload.action === "new") openMenuRef.current();
+    });
     return () => {
       active = false;
-      detach?.();
+      detach.forEach((unlisten) => unlisten());
     };
   }, []);
 
-  const tabs = view.open
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && drag.current) {
+        cancelRef.current();
+        return;
+      }
+      if (!event.ctrlKey || event.altKey || event.metaKey) return;
+      let action: string | null = null;
+      if (event.key === "Tab") action = event.shiftKey ? "prev" : "next";
+      else if (!event.shiftKey && !event.repeat && event.key.toLowerCase() === "t") action = "new";
+      else if (!event.shiftKey && !event.repeat && event.key.toLowerCase() === "w") action = "close";
+      if (!action) return;
+      event.preventDefault();
+      void invoke("tab_shortcut", { action }).catch(() => {});
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const ids = order ?? view.open;
+  const tabs = ids
     .map((id) => view.accounts.find((account) => account.id === id))
     .filter((account): account is AccountRef => account !== undefined);
   const closable = tabs.length > 1;
 
-  function select(id: string) {
+  function select(id: string, force: boolean) {
+    if (!force && id === view.active) return;
     setView((current) => ({ ...current, active: id }));
     void invoke("open_account", { id }).catch(() => {});
   }
@@ -55,56 +157,142 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
     if (!closable) return;
     void invoke("close_tab", { id }).catch(() => {});
   }
-  function onKeyDown(event: KeyboardEvent<HTMLDivElement>, id: string) {
-    if (event.target !== event.currentTarget) return;
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      select(id);
+  function onMouseDown(event: MouseEvent<HTMLElement>) {
+    // Activation happens on click so a drag never opens the tab.
+    event.preventDefault();
+  }
+
+  function onPointerDown(event: PointerEvent<HTMLElement>, id: string) {
+    if (event.button !== 0) return;
+    suppressClick.current = false;
+    const rects: TabRect[] = [];
+    for (const account of tabs) {
+      const holder = holders.current.get(account.id);
+      if (!holder) return;
+      const box = holder.getBoundingClientRect();
+      rects.push({ id: account.id, left: box.left, width: box.width });
     }
+    const origin = rects.findIndex((rect) => rect.id === id);
+    if (origin < 0) return;
+    const gap = rects.length > 1 ? Math.max(0, rects[1].left - (rects[0].left + rects[0].width)) : 0;
+    drag.current = {
+      id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      started: false,
+      rects,
+      origin,
+      target: origin,
+      shift: rects[origin].width + gap,
+      holder: event.currentTarget,
+    };
   }
-  function onMouseDown(event: MouseEvent<HTMLDivElement>) {
-    if (event.button === 1) event.preventDefault();
+
+  function onPointerMove(event: PointerEvent<HTMLElement>) {
+    const current = drag.current;
+    if (!current || event.pointerId !== current.pointerId) return;
+    const dx = event.clientX - current.startX;
+    if (!current.started) {
+      if (Math.abs(dx) < DRAG_THRESHOLD) return;
+      current.started = true;
+      try { current.holder.setPointerCapture(current.pointerId); } catch { /* Capture unavailable. */ }
+    }
+    const { rects, origin } = current;
+    const self = rects[origin];
+    const stripLeft = rects[0].left;
+    const stripRight = rects[rects.length - 1].left + rects[rects.length - 1].width;
+    const offset = Math.min(Math.max(dx, stripLeft - self.left), stripRight - self.width - self.left);
+    const center = self.left + self.width / 2 + offset;
+    let target = 0;
+    rects.forEach((rect, index) => {
+      if (index === origin) return;
+      const middle = rect.left + rect.width / 2;
+      // Ties happen at the strip edges, where the dragged tab belongs past that neighbour.
+      if (dx >= 0 ? middle <= center : middle < center) target += 1;
+    });
+    current.target = target;
+    setDragView({ id: current.id, offset, origin, target, shift: current.shift });
   }
-  function openMenu() {
-    const left = plus.current?.getBoundingClientRect().left ?? 0;
-    void invoke("open_tab_menu", { x: left }).catch(() => {});
+
+  function onPointerUp(event: PointerEvent<HTMLElement>) {
+    const current = drag.current;
+    if (!current || event.pointerId !== current.pointerId) return;
+    drag.current = null;
+    if (!current.started) return;
+    suppressClick.current = true;
+    try { current.holder.releasePointerCapture(current.pointerId); } catch { /* Capture already gone. */ }
+    setDragView(null);
+    if (current.target === current.origin) return;
+    setOrder(moved(current.rects.map((rect) => rect.id), current.origin, current.target));
+    void invoke("move_tab", { id: current.id, index: current.target }).catch(() => {});
   }
 
   return (
-    <div className="flex h-full min-w-0 items-end gap-0.5 pl-1">
-      <div role="tablist" aria-label="Accounts" className="flex h-8 min-w-0 items-end gap-0.5">
-        {tabs.map((account) => {
+    <Tabs
+      value={view.active}
+      onValueChange={(id) => select(id, false)}
+      className="h-full min-w-0 items-end gap-0.5 pl-1 data-horizontal:flex-row"
+    >
+      <TabsList
+        aria-label="Accounts"
+        className="h-8 w-auto min-w-0 items-end justify-start gap-0.5 rounded-none bg-transparent p-0"
+      >
+        {tabs.map((account, index) => {
           const selected = account.id === view.active;
+          const dragging = dragView?.id === account.id;
           return (
             <div
               key={account.id}
-              role="tab"
-              tabIndex={0}
-              aria-selected={selected}
-              aria-label={account.name}
-              title={account.name}
-              onClick={() => select(account.id)}
-              onKeyDown={(event) => onKeyDown(event, account.id)}
-              onMouseDown={onMouseDown}
-              onAuxClick={(event) => {
-                if (event.button === 1) {
+              ref={(node) => {
+                if (node) holders.current.set(account.id, node);
+                else holders.current.delete(account.id);
+              }}
+              onPointerDown={(event) => onPointerDown(event, account.id)}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={cancelDrag}
+              onClickCapture={(event) => {
+                if (suppressClick.current) {
+                  suppressClick.current = false;
                   event.preventDefault();
-                  close(account.id);
+                  event.stopPropagation();
                 }
               }}
+              style={{ transform: translation(index, dragView) }}
               className={cn(
-                "group/tab relative flex h-8 w-40 min-w-24 max-w-40 shrink cursor-default items-center gap-2 rounded-t-lg px-2 text-xs transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                selected
-                  ? "-mb-px h-[calc(2rem+1px)] bg-background pb-px text-foreground"
-                  : "text-muted-foreground hover:bg-muted",
+                "group/tab relative h-8 w-40 min-w-24 max-w-40 shrink touch-none",
+                selected && "-mb-px h-[calc(2rem+1px)]",
+                dragView && !dragging && "transition-transform duration-150",
+                dragging && "z-10 shadow-md",
               )}
             >
-              <span aria-hidden="true"
-                className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold uppercase leading-none text-primary">
-                {account.name.trim()[0] ?? "?"}
-              </span>
-              <span className="min-w-0 flex-1 truncate">{account.name}</span>
+              <TabsTrigger
+                value={account.id}
+                aria-label={account.name}
+                title={account.name}
+                onMouseDown={onMouseDown}
+                onClick={() => select(account.id, true)}
+                onAuxClick={(event) => {
+                  if (event.button === 1) {
+                    event.preventDefault();
+                    close(account.id);
+                  }
+                }}
+                className={cn(
+                  "h-full w-full flex-none cursor-default justify-start gap-2 rounded-b-none rounded-t-lg border-0 px-2 text-xs font-normal shadow-none transition-colors",
+                  "bg-transparent data-active:bg-transparent data-active:shadow-none dark:bg-transparent dark:data-active:border-transparent dark:data-active:bg-transparent",
+                  closable && "pr-7",
+                  selected
+                    ? "bg-background pb-px text-foreground data-active:bg-background dark:bg-background dark:data-active:bg-background"
+                    : "text-muted-foreground hover:bg-muted",
+                )}
+              >
+                <span aria-hidden="true"
+                  className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold uppercase leading-none text-primary">
+                  {account.name.trim()[0] ?? "?"}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-left">{account.name}</span>
+              </TabsTrigger>
               {closable && (
                 <button
                   type="button"
@@ -114,9 +302,10 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
                     event.stopPropagation();
                     close(account.id);
                   }}
+                  onPointerDown={(event) => event.stopPropagation()}
                   onMouseDown={(event) => event.stopPropagation()}
                   className={cn(
-                    "flex size-4 shrink-0 items-center justify-center rounded-sm transition-colors hover:bg-foreground/10",
+                    "absolute right-2 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center rounded-sm transition-colors hover:bg-foreground/10",
                     "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     selected ? "opacity-100" : "opacity-0 group-hover/tab:opacity-100",
                   )}
@@ -127,7 +316,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
             </div>
           );
         })}
-      </div>
+      </TabsList>
       <button
         ref={plus}
         type="button"
@@ -139,6 +328,6 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
       >
         <Plus aria-hidden="true" className="size-4" />
       </button>
-    </div>
+    </Tabs>
   );
 }

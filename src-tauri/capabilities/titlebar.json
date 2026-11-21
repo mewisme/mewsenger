@@ -17,6 +17,8 @@
     "allow-open-account",
     "allow-add-account",
     "allow-close-tab",
-    "allow-open-tab-menu"
+    "allow-open-tab-menu",
+    "allow-move-tab",
+    "allow-tab-shortcut"
   ]
 }

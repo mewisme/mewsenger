@@ -341,6 +341,9 @@ pub enum MessageEvent {
         ok: bool,
         reason: Option<String>,
     },
+    Shortcut {
+        action: String,
+    },
     Reset,
 }
 
@@ -625,6 +628,9 @@ pub fn notification_event(
             clear_thread(&mut registry, &account, &thread_id);
             remove_thread_toasts(&app, &account, &thread_id);
         }
+        MessageEvent::Shortcut { action } => {
+            crate::accounts::shortcut(&app, &action)?;
+        }
         MessageEvent::Reset => {
             reset_view_state(&mut registry, &account);
             toast::clear_account(&app, &account);
@@ -903,6 +909,9 @@ mod tests {
         let session: MessageEvent =
             serde_json::from_str(r#"{"kind":"session","state":"signed_in"}"#).unwrap();
         assert!(matches!(session, MessageEvent::Session { .. }));
+        let shortcut: MessageEvent =
+            serde_json::from_str(r#"{"kind":"shortcut","action":"next"}"#).unwrap();
+        assert!(matches!(shortcut, MessageEvent::Shortcut { action } if action == "next"));
     }
 
     #[test]

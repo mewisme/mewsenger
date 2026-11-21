@@ -4,7 +4,7 @@ import { test } from 'vitest';
 import vm from 'node:vm';
 import { site, facebookSite } from './site-fixture.mjs';
 
-const script = readFileSync(new URL('./desktop.js', import.meta.url), 'utf8');
+const script = readFileSync(new URL('./inject/20-desktop.js', import.meta.url), 'utf8');
 
 function page(url = 'https://www.messenger.com/t/123', siteProfile = site) {
   const handlers = new Map();
@@ -226,17 +226,17 @@ test('Ctrl+number leaves other text inputs alone', () => {
   assert.equal(p.state.chats[0].clicked, 0);
 });
 
-test('Ctrl+Shift+brackets and Ctrl+Tab move between chats', () => {
+test('Ctrl+Shift+brackets move between chats and Ctrl+Tab is left to the tab strip', () => {
   const p = chatPage(3);
   p.location.pathname = '/t/101';
   p.fire('document:keydown', { key: '}', code: 'BracketRight', ctrlKey: true, shiftKey: true });
   assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [0, 0, 1]);
   p.fire('document:keydown', { key: '{', code: 'BracketLeft', ctrlKey: true, shiftKey: true });
   assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [1, 0, 1]);
-  p.fire('document:keydown', { key: 'Tab', ctrlKey: true });
-  assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [1, 0, 2]);
+  const tab = p.fire('document:keydown', { key: 'Tab', ctrlKey: true });
   p.fire('document:keydown', { key: 'Tab', ctrlKey: true, shiftKey: true });
-  assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [2, 0, 2]);
+  assert.equal(tab.defaultPrevented, false);
+  assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [1, 0, 1]);
 });
 
 test('shortcuts ignore IME composition', () => {
