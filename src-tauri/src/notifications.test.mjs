@@ -464,3 +464,27 @@ test('quick reply rejects malformed requests without queueing them', () => {
   assert.equal(p.window.__mewQuickReply({ thread: '', text: 'x', nonce: 'n' }), false);
   assert.equal(p.window.__mewQuickReply(null), false);
 });
+
+const focusEvents = (p) => p.events.filter(({ event }) => event.kind === 'focus').length;
+
+test('a page that loads focused reports focus once, and each regain reports once', () => {
+  const p = createPage();
+  assert.equal(focusEvents(p), 1);
+  // Repeated focus events without a blur in between are one focus gain.
+  p.focus();
+  p.focus();
+  assert.equal(focusEvents(p), 1);
+  p.blur();
+  assert.equal(focusEvents(p), 1);
+  p.focus();
+  assert.equal(focusEvents(p), 2);
+  p.focus();
+  assert.equal(focusEvents(p), 2);
+});
+
+test('blurring alone never reports focus', () => {
+  const p = createPage();
+  p.events.length = 0;
+  p.blur();
+  assert.equal(focusEvents(p), 0);
+});

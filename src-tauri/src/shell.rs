@@ -499,7 +499,7 @@ pub fn open_settings(app: &AppHandle) {
         )
         .on_navigation(local_asset_url)
         .title("Messenger settings")
-        .inner_size(480.0, 420.0)
+        .inner_size(480.0, 620.0)
         .min_inner_size(420.0, 360.0)
         .resizable(true)
         .visible(false)

@@ -262,8 +262,17 @@
     subtree: true, childList: true, attributes: true, attributeFilter: ['aria-label'],
   });
   document.addEventListener('visibilitychange', queue);
-  window.addEventListener('blur', queue);
-  window.addEventListener('focus', queue);
+  // Tells the shell which account's page the user is working in. One event
+  // per focus gain, not per focus event.
+  let focusReported = false;
+  const reportFocus = () => {
+    if (focusReported) return;
+    focusReported = true;
+    send({ kind: 'focus' });
+  };
+  window.addEventListener('blur', () => { focusReported = false; queue(); });
+  window.addEventListener('focus', () => { reportFocus(); queue(); });
+  if (document.hasFocus?.()) reportFocus();
   window.addEventListener('popstate', queue);
   window.addEventListener('hashchange', queue);
   window.addEventListener('pagehide', () => send({ kind: 'reset' }));
