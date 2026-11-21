@@ -23,3 +23,8 @@ coverage
 *.njsproj
 *.sln
 *.sw?
+
+# Updater signing keys (the .pub half may be committed)
+/key
+/key.pub.bak
+src-tauri/key

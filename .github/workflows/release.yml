@@ -1,0 +1,93 @@
+name: Release desktop
+
+# Builds signed Windows installers and a portable executable and attaches them
+# to a DRAFT release. Publishing stays a manual step.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "TAG=v$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+          fi
+
+      - name: Refuse an unconfigured updater key
+        shell: bash
+        run: |
+          if grep -q REPLACE_WITH src-tauri/tauri.release.conf.json; then
+            echo "src-tauri/tauri.release.conf.json still holds the pubkey placeholder" >&2
+            exit 1
+          fi
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.16.1
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify application version
+        run: pnpm version:check
+
+      - name: Build signed installers
+        run: pnpm tauri build --config src-tauri/tauri.release.conf.json
+
+      - name: Create updater manifest
+        shell: bash
+        run: |
+          setup=$(ls src-tauri/target/release/bundle/nsis/*-setup.exe | head -n 1)
+          node scripts/release-manifest.mjs "$TAG" "$setup" "$setup.sig" latest.json
+
+      - name: Build portable executable
+        run: pnpm tauri build --no-bundle --config src-tauri/tauri.release.conf.json -- --features portable
+
+      - name: Collect portable executable
+        shell: bash
+        run: cp src-tauri/target/release/messenger.exe Messenger-windows-portable.exe
+
+      - name: Upload to a draft release
+        shell: bash
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --generate-notes --title "$TAG"
+          gh release upload "$TAG" --clobber \
+            src-tauri/target/release/bundle/nsis/*-setup.exe \
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig \
+            src-tauri/target/release/bundle/msi/*.msi \
+            src-tauri/target/release/bundle/msi/*.msi.sig \
+            latest.json \
+            Messenger-windows-portable.exe

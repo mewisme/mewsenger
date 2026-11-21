@@ -391,3 +391,85 @@ test('a reloaded page re-baselines instead of announcing old unread conversation
     ['b'],
   );
 });
+
+function fakeComposer({ text = '', sends = true, insertWorks = true } = {}) {
+  const field = {
+    textContent: text,
+    insertWorks,
+    keys: [],
+    getBoundingClientRect: () => ({ width: 200 }),
+    closest: () => ({}),
+    focus() {},
+    dispatchEvent(event) {
+      this.keys.push(event.type);
+      if (event.type === 'keydown' && event.key === 'Enter' && sends) {
+        field.sent = field.textContent;
+        field.textContent = '';
+      }
+      return true;
+    },
+  };
+  return field;
+}
+
+const replyResults = (p) => p.events.filter((e) => e.event.kind === 'reply_result').map((e) => ({ ...e.event }));
+
+test('quick reply types into the open conversation composer, presses Enter and reports success', async () => {
+  const p = createPage();
+  const field = fakeComposer();
+  p.setComposer(field);
+  assert.equal(p.window.__mewQuickReply({ thread: '1', text: 'ok', nonce: 'toast-9' }), true);
+  await p.settle();
+  assert.equal(field.sent, 'ok');
+  assert.deepEqual(field.keys, ['keydown', 'keypress', 'keyup']);
+  assert.deepEqual(replyResults(p), [{ kind: 'reply_result', nonce: 'toast-9', ok: true }]);
+});
+
+test('quick reply keeps the existing draft when the send does not go through', async () => {
+  const p = createPage();
+  const field = fakeComposer({ text: 'half-written', sends: false });
+  p.setComposer(field);
+  p.window.__mewQuickReply({ thread: '1', text: 'ok', nonce: 'toast-9' });
+  await p.settle();
+  assert.equal(field.textContent, 'half-written');
+  assert.deepEqual(replyResults(p), [{ kind: 'reply_result', nonce: 'toast-9', ok: false, reason: 'send_failed' }]);
+});
+
+test('quick reply restores the draft after a successful send', async () => {
+  const p = createPage();
+  const field = fakeComposer({ text: 'draft' });
+  p.setComposer(field);
+  p.window.__mewQuickReply({ thread: '1', text: 'ok', nonce: 'toast-9' });
+  await p.settle();
+  assert.equal(field.sent, 'ok');
+  assert.equal(field.textContent, 'draft');
+  assert.equal(replyResults(p)[0].ok, true);
+});
+
+test('quick reply reports a missing conversation instead of typing elsewhere', async () => {
+  const p = createPage();
+  const field = fakeComposer();
+  p.setComposer(field);
+  p.window.__mewQuickReply({ thread: '77', text: 'ok', nonce: 'toast-3' });
+  await p.settle();
+  assert.equal(field.sent, undefined);
+  assert.deepEqual(replyResults(p), [{ kind: 'reply_result', nonce: 'toast-3', ok: false, reason: 'thread_not_found' }]);
+});
+
+test('quick reply reports when the composer refuses the text', async () => {
+  const p = createPage();
+  const field = fakeComposer({ insertWorks: false });
+  p.setComposer(field);
+  p.window.__mewQuickReply({ thread: '1', text: 'ok', nonce: 'toast-4' });
+  await p.settle();
+  assert.equal(field.keys.length, 0);
+  assert.equal(replyResults(p)[0].reason, 'insert_failed');
+});
+
+test('quick reply rejects malformed requests without queueing them', () => {
+  const p = createPage();
+  assert.equal(p.window.__mewQuickReply({ thread: '1', text: '', nonce: 'n' }), false);
+  assert.equal(p.window.__mewQuickReply({ thread: '1', text: 'x'.repeat(2001), nonce: 'n' }), false);
+  assert.equal(p.window.__mewQuickReply({ thread: '', text: 'x', nonce: 'n' }), false);
+  assert.equal(p.window.__mewQuickReply(null), false);
+});

@@ -7,6 +7,7 @@ mod notifications;
 mod prefs;
 mod shell;
 mod site;
+mod toast;
 mod updater;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
