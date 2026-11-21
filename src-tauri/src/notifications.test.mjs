@@ -301,21 +301,12 @@ test('only the scoped Messenger command is granted to remote content', () => {
   );
   const local = JSON.parse(fs.readFileSync(
     new URL('../capabilities/default.json', import.meta.url), 'utf8'));
-  const credits = JSON.parse(fs.readFileSync(
-    new URL('../capabilities/credits.json', import.meta.url), 'utf8'));
   assert.deepEqual(local.webviews, ['status']);
   assert.equal(local.windows, undefined);
   assert.deepEqual(local.permissions, [
-    'core:default', 'allow-show-credits', 'allow-show-settings',
-    'allow-current-status', 'allow-test-notification',
+    'core:default', 'allow-show-settings', 'allow-current-status',
     'allow-reveal-last-download', 'allow-get-update-state', 'allow-check-update',
-    'allow-install-update', 'allow-get-diagnostics',
-  ]);
-  assert.deepEqual(credits.webviews, ['credits']);
-  assert.equal(credits.windows, undefined);
-  assert.equal(credits.remote, undefined);
-  assert.deepEqual(credits.permissions, [
-    'core:app:allow-version', 'core:window:allow-close',
+    'allow-install-update',
   ]);
   const desktop = JSON.parse(fs.readFileSync(
     new URL('../capabilities/desktop.json', import.meta.url), 'utf8'));

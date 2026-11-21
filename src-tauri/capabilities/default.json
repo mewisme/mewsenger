@@ -5,14 +5,11 @@
   "webviews": ["status"],
   "permissions": [
     "core:default",
-    "allow-show-credits",
     "allow-show-settings",
     "allow-current-status",
-    "allow-test-notification",
     "allow-reveal-last-download",
     "allow-get-update-state",
     "allow-check-update",
-    "allow-install-update",
-    "allow-get-diagnostics"
+    "allow-install-update"
   ]
 }

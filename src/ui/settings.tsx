@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { Button } from "@/components/ui/button";
+import appIcon from "../../src-tauri/icons/128x128.png";
 import { Switch } from "@/components/ui/switch";
 import { updateActionable, updateTooltip } from "@/ui/status-types";
 import { useUpdate } from "@/ui/use-update";
@@ -37,6 +38,7 @@ export function Settings({ version }: { version: string }) {
   const { update, act } = useUpdate();
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [copied, setCopied] = useState(false);
+  const [testStatus, setTestStatus] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -81,6 +83,13 @@ export function Settings({ version }: { version: string }) {
     });
   }
 
+  function sendTestNotification() {
+    setTestStatus("Sending notification request…");
+    invoke("test_notification")
+      .then(() => setTestStatus("Request sent; check Windows notifications"))
+      .catch(() => setTestStatus("Notification request failed"));
+  }
+
   function copyDiagnostics() {
     setError(null);
     setCopied(false);
@@ -104,6 +113,14 @@ export function Settings({ version }: { version: string }) {
           disabled={prefs === null}
           onChange={(value) => setPreference("notification_preview", value)}
         />
+        <div className="flex items-center justify-between gap-4 py-2">
+          <p role="status" aria-live="polite" className="text-xs text-muted-foreground">
+            {testStatus ?? "Send a test notification to the operating system."}
+          </p>
+          <Button type="button" variant="secondary" size="sm" onClick={sendTestNotification}>
+            Send test notification
+          </Button>
+        </div>
       </section>
       <section aria-labelledby="settings-startup">
         <h2 id="settings-startup" className="text-sm font-semibold">Startup</h2>
@@ -146,7 +163,14 @@ export function Settings({ version }: { version: string }) {
         {copied && <p role="status" className="text-xs text-muted-foreground">Copied</p>}
       </section>
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-      <p className="mt-auto text-xs text-muted-foreground">Version {version}</p>
+      <section aria-labelledby="settings-about" className="mt-auto flex items-center gap-3">
+        <img src={appIcon} alt="Messenger icon" className="size-10 shrink-0" />
+        <div className="min-w-0">
+          <h2 id="settings-about" className="text-sm font-semibold">Messenger</h2>
+          <p className="text-xs text-muted-foreground">Version {version} · Made by Mew</p>
+          <p className="text-xs text-muted-foreground">Desktop client powered by Tauri, React and shadcn/ui.</p>
+        </div>
+      </section>
     </main>
   );
 }

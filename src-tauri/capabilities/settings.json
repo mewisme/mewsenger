@@ -13,6 +13,7 @@
     "allow-check-update",
     "allow-install-update",
     "allow-get-diagnostics",
+    "allow-test-notification",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"

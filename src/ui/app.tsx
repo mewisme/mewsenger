@@ -3,46 +3,43 @@ import { getVersion } from "@tauri-apps/api/app";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBar } from "@/ui/status-bar";
 import { TitleBar } from "@/ui/title-bar";
 import { resolveLocalView } from "@/ui/local-view";
-import { Credits } from "@/ui/credits";
 import { Settings } from "@/ui/settings";
-
 import type { DownloadStatus } from "@/ui/status-types";
 import { useUpdate } from "@/ui/use-update";
 
+type NativeStatus = { unread_count: number | null; session?: boolean | null };
+
 export function DesktopApp() {
   const [version, setVersion] = useState("Version unavailable");
-  const [creditsOpen, setCreditsOpen] = useState(false);
-  const [notificationTestStatus, setNotificationTestStatus] = useState<string | null>(null);
   const localView = resolveLocalView(
     typeof window !== "undefined" ? window.location.search : "",
     isTauri() ? getCurrentWebview().label : null,
   );
-  const creditsView = localView === "credits";
   const titlebarView = localView === "titlebar";
   const settingsView = localView === "settings";
+  const statusView = localView === "status";
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const [session, setSession] = useState<boolean | null>(null);
   const [download, setDownload] = useState<DownloadStatus | null>(null);
-  const { update, act } = useUpdate(!creditsView && !titlebarView && !settingsView);
+  const { update, act } = useUpdate(statusView);
   const [connection, setConnection] = useState<"offline" | "unknown">(
     () => typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "unknown",
   );
 
   useEffect(() => {
-    if (!isTauri() || titlebarView) return;
+    if (!isTauri() || !settingsView) return;
     let active = true;
     void getVersion()
       .then((value) => { if (active) setVersion(value); })
       .catch(() => { if (active) setVersion("Version unavailable"); });
     return () => { active = false; };
-  }, [titlebarView]);
+  }, [settingsView]);
 
   useEffect(() => {
-    if (!isTauri() || creditsView || titlebarView || settingsView) return;
+    if (!isTauri() || !statusView) return;
     let active = true;
     let eventReceived = false;
     let detach: (() => void) | undefined;
@@ -53,7 +50,7 @@ export function DesktopApp() {
         count >= 0 ? count : null);
       setSession(typeof nextSession === "boolean" ? nextSession : null);
     };
-    void listen<{ unread_count: number | null; session?: boolean | null }>("desktop-status", (event) => {
+    void listen<NativeStatus>("desktop-status", (event) => {
       eventReceived = true;
       accept(event.payload.unread_count, event.payload.session);
     }).then((unlisten) => {
@@ -62,7 +59,7 @@ export function DesktopApp() {
         return;
       }
       detach = unlisten;
-      return invoke<{ unread_count: number | null; session?: boolean | null }>("current_status")
+      return invoke<NativeStatus>("current_status")
         .then((snapshot) => {
           if (!eventReceived) accept(snapshot.unread_count, snapshot.session);
         });
@@ -71,10 +68,10 @@ export function DesktopApp() {
       active = false;
       detach?.();
     };
-  }, [creditsView, titlebarView, settingsView]);
+  }, [statusView]);
 
   useEffect(() => {
-    if (!isTauri() || creditsView || titlebarView || settingsView) return;
+    if (!isTauri() || !statusView) return;
     let active = true;
     let detach: (() => void) | undefined;
     void listen<DownloadStatus>("download-status", (event) => {
@@ -87,10 +84,10 @@ export function DesktopApp() {
       active = false;
       detach?.();
     };
-  }, [creditsView, titlebarView, settingsView]);
+  }, [statusView]);
 
   useEffect(() => {
-    if (titlebarView || creditsView || settingsView) return;
+    if (!statusView) return;
     const offline = () => setConnection("offline");
     // A working network connection does not prove a Messenger session is connected.
     const online = () => setConnection("unknown");
@@ -100,63 +97,28 @@ export function DesktopApp() {
       window.removeEventListener("offline", offline);
       window.removeEventListener("online", online);
     };
-  }, [titlebarView, creditsView, settingsView]);
+  }, [statusView]);
 
   if (titlebarView) return <TitleBar />;
 
   if (settingsView) return <Settings version={version} />;
 
-  if (creditsView) {
-    return <Credits version={version} />;
-  }
-
-  function showCredits() {
-    if (isTauri()) {
-      void invoke("show_credits").catch(() => setCreditsOpen(true));
-      return;
-    }
-    setCreditsOpen(true);
-  }
-
   function showSettings() {
     void invoke("show_settings").catch(() => { /* The tray menu offers the same window. */ });
-  }
-
-  function testDesktopNotification() {
-    if (!isTauri()) return;
-    setNotificationTestStatus("Sending notification request…");
-    void invoke("test_notification")
-      .then(() => setNotificationTestStatus("Request sent; check Windows notifications"))
-      .catch(() => setNotificationTestStatus("Notification request failed"));
   }
 
   return (
     <main className="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-background">
       <div className="min-h-0 flex-1" aria-hidden="true" />
       <StatusBar
-        version={version}
         connection={connection === "offline" ? "offline" : session === true ? "connected" : session === false ? "signed_out" : "unknown"}
         unreadCount={unreadCount}
-        onCredits={showCredits}
         onSettings={isTauri() ? showSettings : undefined}
-        onTestNotification={isTauri() ? testDesktopNotification : undefined}
         update={update}
         onUpdate={isTauri() ? act : undefined}
         download={download}
         onRevealDownload={() => { void invoke("reveal_last_download").catch(() => {}); }}
-        notificationTestStatus={notificationTestStatus}
       />
-      <Dialog open={creditsOpen} onOpenChange={setCreditsOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Messenger desktop</DialogTitle>
-            <DialogDescription>
-              A desktop client built with Tauri, React, and shadcn/ui.
-            </DialogDescription>
-          </DialogHeader>
-          <p className="text-xs text-muted-foreground">Made by Mew</p>
-        </DialogContent>
-      </Dialog>
     </main>
   );
 }

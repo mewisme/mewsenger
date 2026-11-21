@@ -58,67 +58,43 @@ beforeEach(() => {
   runtime.getVersion.mockReset().mockResolvedValue("2.3.4");
 });
 
-test("reads installed app version using the trusted Tauri API", async () => {
+test("status bar shows connection and unread only; version lives in Settings", async () => {
   render(<DesktopApp />);
-  expect((await screen.findByLabelText("Application version")).textContent).toBe("2.3.4");
-  expect(runtime.getVersion).toHaveBeenCalledOnce();
   expect(screen.getByRole("status", { name: "Connection status" }).textContent).toBe("Status unavailable");
   expect(screen.getByLabelText("Unread conversations").textContent).toBe("–");
+  expect(screen.queryByLabelText("Application version")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Credits" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Test desktop notifications" })).toBeNull();
+  expect(runtime.getVersion).not.toHaveBeenCalled();
 });
 
-test("test notification action sends a scoped native request with factual feedback", async () => {
+test("the update control stays hidden while updates are not configured", async () => {
+  render(<DesktopApp />);
+  await waitFor(() => expect(runtime.invoke).toHaveBeenCalledWith("get_update_state"));
+  expect(screen.queryByRole("button", { name: "Updates" })).toBeNull();
+});
+
+test("the gear opens the native settings window", async () => {
   const user = userEvent.setup();
   render(<DesktopApp />);
-  await user.click(screen.getByRole("button", { name: "Test desktop notifications" }));
-  expect(runtime.invoke).toHaveBeenCalledWith("test_notification");
-  expect(await screen.findByText("Request sent; check Windows notifications")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Settings" }));
+  expect(runtime.invoke).toHaveBeenCalledWith("show_settings");
 });
 
-test("test notification errors are shown without claiming delivery", async () => {
-  runtime.invoke.mockImplementation((name) =>
-    name === "test_notification" ? Promise.reject(new Error("not permitted")) :
-      Promise.resolve(name === "current_status" ? { unread_count: null } : undefined),
-  );
-  const user = userEvent.setup();
+test("the settings window reads the installed version and does not subscribe to footer events", async () => {
+  runtime.view = "settings";
   render(<DesktopApp />);
-  await user.click(screen.getByRole("button", { name: "Test desktop notifications" }));
-  expect(await screen.findByText("Notification request failed")).toBeTruthy();
+  expect(await screen.findByText(/Version 2\.3\.4/)).toBeTruthy();
+  expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
+  expect(runtime.listen).not.toHaveBeenCalledWith("desktop-status", expect.any(Function));
 });
 
-test("does not invent version data outside the Tauri runtime", () => {
+test("does not invent data outside the Tauri runtime", () => {
   runtime.available = false;
   render(<DesktopApp />);
-  expect(screen.getByLabelText("Application version").textContent).toBe("Version unavailable");
   expect(runtime.getVersion).not.toHaveBeenCalled();
   expect(runtime.listen).not.toHaveBeenCalled();
-});
-
-test("opens the local native credits window without a clipped footer dialog", async () => {
-  const user = userEvent.setup();
-  render(<DesktopApp />);
-  await user.click(screen.getByRole("button", { name: "Credits" }));
-  expect(runtime.invoke).toHaveBeenCalledWith("show_credits");
-  expect(screen.queryByRole("dialog")).toBeNull();
-});
-
-test("opens credits details in the browser preview", async () => {
-  runtime.available = false;
-  const user = userEvent.setup();
-  render(<DesktopApp />);
-  await user.click(screen.getByRole("button", { name: "Credits" }));
-  expect((await screen.findByRole("dialog")).textContent).toContain("Messenger desktop");
-  expect(screen.getByText("Made by Mew")).toBeTruthy();
-});
-
-test("native credits window shows factual metadata, not another status bar", async () => {
-  runtime.view = "credits";
-  render(<DesktopApp />);
-  expect(await screen.findByText("Version 2.3.4")).toBeTruthy();
-  expect(screen.getByRole("heading", { name: "Messenger" })).toBeTruthy();
-  expect(screen.getByRole("img", { name: "Messenger icon" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
-  expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
-  expect(runtime.listen).not.toHaveBeenCalled();
+  expect(screen.getByRole("status", { name: "Connection status" }).textContent).toBe("Status unavailable");
 });
 
 test("local title bar never renders the bottom status bar or requests native unread data", () => {

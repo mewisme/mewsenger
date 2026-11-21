@@ -55,7 +55,7 @@ test("shows the stored preference and names every control", async () => {
   render(<Settings version="0.1.14" />);
   await waitFor(() => expect(preview().getAttribute("aria-checked")).toBe("false"));
   expect(screen.getByRole("switch", { name: "Launch Messenger when I sign in to Windows" })).toBeTruthy();
-  expect(screen.getByText("Version 0.1.14")).toBeTruthy();
+  expect(screen.getByText(/Version 0\.1\.14/)).toBeTruthy();
 });
 
 test("toggling saves the exact key and value", async () => {
@@ -144,4 +144,19 @@ test("every settings control has an accessible name", async () => {
   for (const control of [...screen.getAllByRole("switch"), ...screen.getAllByRole("button")]) {
     expect((control.getAttribute("aria-label") ?? control.textContent ?? "").trim()).not.toBe("");
   }
+});
+
+test("the test notification button reports the request outcome", async () => {
+  mock.invoke.mockImplementation((command: string) =>
+    command === "test_notification"
+      ? Promise.resolve()
+      : command === "get_preferences" ? Promise.resolve({ notification_preview: true }) : Promise.reject(new Error("x")));
+  const user = userEvent.setup();
+  render(<Settings version="0.1.14" />);
+  await user.click(screen.getByRole("button", { name: "Send test notification" }));
+  expect(mock.invoke).toHaveBeenCalledWith("test_notification");
+  expect(await screen.findByText("Request sent; check Windows notifications")).toBeTruthy();
+  mock.invoke.mockImplementation(() => Promise.reject(new Error("denied")));
+  await user.click(screen.getByRole("button", { name: "Send test notification" }));
+  expect(await screen.findByText("Notification request failed")).toBeTruthy();
 });

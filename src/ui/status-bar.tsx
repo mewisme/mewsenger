@@ -1,7 +1,6 @@
-import { Bell, CircleDot, Download, Info, RefreshCcw, Settings } from "lucide-react";
+import { CircleDot, Download, RefreshCcw, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   downloadTooltip, updateActionable, updateTooltip,
@@ -11,13 +10,9 @@ import {
 export type ConnectionState = "connected" | "offline" | "signed_out" | "unknown";
 
 export interface StatusBarProps {
-  version: string;
   connection: ConnectionState;
   unreadCount: number | null;
-  onCredits: () => void;
   onSettings?: () => void;
-  onTestNotification?: () => void;
-  notificationTestStatus?: string | null;
   update?: UpdateState;
   onUpdate?: () => void;
   download?: DownloadStatus | null;
@@ -34,8 +29,7 @@ const labels: Record<ConnectionState, string> = {
 const unconfigured: UpdateState = { state: "unconfigured" };
 
 export function StatusBar({
-  version, connection, unreadCount, onCredits, onSettings, onTestNotification,
-  notificationTestStatus, update = unconfigured, onUpdate, download, onRevealDownload,
+  connection, unreadCount, onSettings, update = unconfigured, onUpdate, download, onRevealDownload,
 }: StatusBarProps) {
   const updatesOff = update.state === "unconfigured";
   return (
@@ -65,34 +59,19 @@ export function StatusBar({
               <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">{downloadTooltip(download)}</TooltipContent>
             </Tooltip>
           )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-xs" type="button"
-                disabled={!onTestNotification} onClick={onTestNotification}
-                aria-label="Test desktop notifications">
-                <Bell aria-hidden="true" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">
-              {notificationTestStatus ?? "Send a test notification to the operating system"}
-            </TooltipContent>
-          </Tooltip>
-          <span role="status" aria-live="polite" className="sr-only">
-            {notificationTestStatus}
-          </span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-xs" type="button"
-                disabled={updatesOff || !onUpdate || !updateActionable(update)}
-                onClick={onUpdate}
-                aria-label={updatesOff ? "Updates unavailable" : "Updates"}>
-                <RefreshCcw aria-hidden="true" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">{updateTooltip(update)}</TooltipContent>
-          </Tooltip>
-          <Separator orientation="vertical" className="h-3" />
-          <span aria-label="Application version" className="tabular-nums">{version}</span>
+          {!updatesOff && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-xs" type="button"
+                  disabled={!onUpdate || !updateActionable(update)}
+                  onClick={onUpdate}
+                  aria-label="Updates">
+                  <RefreshCcw aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">{updateTooltip(update)}</TooltipContent>
+            </Tooltip>
+          )}
           {onSettings && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -103,14 +82,6 @@ export function StatusBar({
               <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">Settings</TooltipContent>
             </Tooltip>
           )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-xs" type="button" onClick={onCredits} aria-label="Credits">
-                <Info aria-hidden="true" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left" sideOffset={6} className="max-w-none whitespace-nowrap py-1">Credits</TooltipContent>
-          </Tooltip>
         </div>
       </footer>
     </TooltipProvider>

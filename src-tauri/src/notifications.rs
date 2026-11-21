@@ -254,8 +254,8 @@ fn trusted_status_view(webview: &Webview) -> bool {
 
 #[tauri::command]
 pub fn test_notification(app: AppHandle, webview: Webview) -> Result<(), String> {
-    if !trusted_status_view(&webview) {
-        return Err("local status view required".into());
+    if !crate::shell::local_webview(&webview, &[crate::shell::STATUS, "settings"]) {
+        return Err("local view required".into());
     }
     deliver(
         &app,

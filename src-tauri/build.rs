@@ -4,7 +4,6 @@ fn main() {
             "notification_event",
             "current_status",
             "test_notification",
-            "show_credits",
             "show_settings",
             "get_preferences",
             "set_preference",

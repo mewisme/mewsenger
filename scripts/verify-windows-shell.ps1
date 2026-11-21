@@ -62,7 +62,7 @@ function Invoke-Control([System.Windows.Automation.AutomationElement]$Root, [str
 
 function Find-About([int]$ProcessId) {
     $condition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::NameProperty, "About Messenger"
+        [System.Windows.Automation.AutomationElement]::NameProperty, "Messenger settings"
     )
     $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
         [System.Windows.Automation.TreeScope]::Children, $condition
@@ -79,7 +79,7 @@ function Wait-About([int]$ProcessId, [bool]$Present) {
         if (($null -ne $window) -eq $Present) { return $window }
         Start-Sleep -Milliseconds 300
     }
-    throw "About window did not reach expected state: visible=$Present"
+    throw "Settings window did not reach expected state: visible=$Present"
 }
 
 $owned = $null
@@ -102,7 +102,7 @@ try {
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
     $required = @(
         "Minimize window", "Maximize window", "Close window",
-        "Credits", "Unread conversations", "Application version", "Connection status"
+        "Settings", "Unread conversations", "Connection status"
     )
     foreach ($name in $required) {
         $null = Require-Control $root $name
@@ -130,20 +130,19 @@ try {
     Write-Output "Native resize verified."
 
     if (-not $InspectOnly) {
-        Invoke-Control $root "Credits"
+        Invoke-Control $root "Settings"
         $about = Wait-About $owned.Id $true
-        $repository = Split-Path -Parent $PSScriptRoot
-        $version = (Get-Content (Join-Path $repository "package.json") -Raw | ConvertFrom-Json).version
-        $null = Require-Control $about $version
-        Invoke-Control $about "Close"
+        $null = Require-Control $about "Send test notification"
+        $null = Require-Control $about "Copy diagnostics"
+        $about.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
         $null = Wait-About $owned.Id $false
-        Write-Output "About content, version and Close button verified."
+        Write-Output "Settings controls verified and native close works."
 
-        Invoke-Control $root "Credits"
+        Invoke-Control $root "Settings"
         $reopened = Wait-About $owned.Id $true
         $reopened.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
         $null = Wait-About $owned.Id $false
-        Write-Output "About reopened and native close button verified."
+        Write-Output "Settings reopened and closed again."
 
         Invoke-Control $root "Maximize window"
         if (-not [MessengerWindow]::IsZoomed($hwnd)) { throw "Maximize did not complete." }

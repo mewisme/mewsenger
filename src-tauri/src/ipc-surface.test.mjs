@@ -39,18 +39,18 @@ test('local views receive exactly the commands they use', () => {
     'core:event:allow-listen', 'core:event:allow-unlisten', 'core:app:allow-version',
     'core:window:allow-close', 'allow-get-preferences', 'allow-set-preference',
     'allow-get-update-state', 'allow-check-update', 'allow-install-update',
-    'allow-get-diagnostics', 'autostart:allow-enable', 'autostart:allow-disable',
-    'autostart:allow-is-enabled',
+    'allow-get-diagnostics', 'allow-test-notification', 'autostart:allow-enable',
+    'autostart:allow-disable', 'autostart:allow-is-enabled',
   ]);
   assert.deepEqual(byId('default').permissions, [
-    'core:default', 'allow-show-credits', 'allow-show-settings', 'allow-current-status',
-    'allow-test-notification', 'allow-reveal-last-download', 'allow-get-update-state',
-    'allow-check-update', 'allow-install-update', 'allow-get-diagnostics',
+    'core:default', 'allow-show-settings', 'allow-current-status',
+    'allow-reveal-last-download', 'allow-get-update-state', 'allow-check-update',
+    'allow-install-update',
   ]);
 });
 
 test('settings commands are not offered to the status or title bar views', () => {
-  for (const id of ['default', 'titlebar', 'credits']) {
+  for (const id of ['default', 'titlebar']) {
     const permissions = byId(id).permissions;
     assert.ok(!permissions.includes('allow-set-preference'), id);
     assert.ok(!permissions.includes('allow-get-preferences'), id);
