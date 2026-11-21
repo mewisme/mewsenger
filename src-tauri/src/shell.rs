@@ -152,6 +152,11 @@ pub fn resize(window: &Window) -> tauri::Result<()> {
     );
     let body_height = body_bottom - header;
     let split = views.iter().any(|v| v.label() == accounts::SPLIT);
+    if split && width + 0.5 < SPLIT_MIN_WIDTH {
+        // The OS minimum can come out narrower than asked for on a frameless
+        // window. Snap back; the resulting resize event lays the views out.
+        return window.set_size(LogicalSize::new(SPLIT_MIN_WIDTH, height));
+    }
     if split {
         let config = accounts::snapshot(&window.app_handle().clone());
         let remotes = config
@@ -368,6 +373,7 @@ fn rebuild(app: &AppHandle, show_main: Option<bool>) -> tauri::Result<()> {
     main.set_min_size(Some(LogicalSize::new(MIN_WIDTH, MIN_HEIGHT)))?;
     let first = &config.accounts[0];
     mount_account(app, &main, first, show_main)?;
+    let mut windows = vec![main.clone()];
     for account in config.accounts.iter().skip(1) {
         let label = accounts::window_label(&account.id);
         let window = WindowBuilder::new(app, &label)
@@ -379,8 +385,58 @@ fn rebuild(app: &AppHandle, show_main: Option<bool>) -> tauri::Result<()> {
             .center()
             .build()?;
         mount_account(app, &window, account, reopen.contains(&label))?;
+        windows.push(window);
     }
+    arrange_windows(&main, &windows);
     Ok(())
+}
+
+/// Top-left corners that put windows of `sizes` in one centered row inside
+/// `area` (x, y, width, height), or `None` when they do not fit side by side.
+fn row_positions(area: (i32, i32, u32, u32), sizes: &[(u32, u32)]) -> Option<Vec<(i32, i32)>> {
+    let total: u64 = sizes.iter().map(|s| u64::from(s.0)).sum();
+    if sizes.len() < 2 || total > u64::from(area.2) {
+        return None;
+    }
+    let mut x = area.0 + ((u64::from(area.2) - total) / 2) as i32;
+    Some(
+        sizes
+            .iter()
+            .map(|&(width, height)| {
+                let y = area.1 + (i64::from(area.3) - i64::from(height)).max(0) as i32 / 2;
+                let position = (x, y);
+                x += width as i32;
+                position
+            })
+            .collect(),
+    )
+}
+
+/// Lines the account windows up so they can all be seen at once when the
+/// screen is wide enough; otherwise they keep their centered placement.
+fn arrange_windows(anchor: &Window, windows: &[Window]) {
+    let Ok(Some(monitor)) = anchor.current_monitor() else {
+        return;
+    };
+    let area = monitor.work_area();
+    let sizes = windows
+        .iter()
+        .filter_map(|w| w.outer_size().ok().map(|s| (s.width, s.height)))
+        .collect::<Vec<_>>();
+    if sizes.len() != windows.len() {
+        return;
+    }
+    let rect = (
+        area.position.x,
+        area.position.y,
+        area.size.width,
+        area.size.height,
+    );
+    if let Some(positions) = row_positions(rect, &sizes) {
+        for (window, (x, y)) in windows.iter().zip(positions) {
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+    }
 }
 
 /// Tears down and mounts every account view for the stored layout. Runs on a
@@ -588,6 +644,23 @@ mod tests {
         let rects = split_rects(1206.0, 0.1, 2);
         assert_eq!(rects[0].1, 480.0);
         assert_eq!(rects[1].0, 486.0);
+    }
+
+    #[test]
+    fn windows_form_one_centered_row_only_when_they_fit() {
+        let area = (0, 0, 3000, 1400);
+        let sizes = [(802, 602), (802, 602)];
+        assert_eq!(
+            row_positions(area, &sizes),
+            Some(vec![(698, 399), (1500, 399)])
+        );
+        // Offset monitors keep their origin.
+        assert_eq!(
+            row_positions((-1920, 200, 1920, 1000), &sizes).unwrap()[0],
+            (-1920 + 158, 200 + 199)
+        );
+        assert_eq!(row_positions((0, 0, 1500, 900), &sizes), None);
+        assert_eq!(row_positions(area, &[(802, 602)]), None);
     }
 
     #[test]

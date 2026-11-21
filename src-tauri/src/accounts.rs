@@ -227,7 +227,13 @@ pub fn data_directory(app: &AppHandle, id: &str) -> Option<PathBuf> {
     if id == FIRST || !valid_id(id) {
         return None;
     }
-    Some(app.path().app_local_data_dir().ok()?.join("accounts").join(id))
+    Some(
+        app.path()
+            .app_local_data_dir()
+            .ok()?
+            .join("accounts")
+            .join(id),
+    )
 }
 
 pub fn snapshot(app: &AppHandle) -> Config {
@@ -550,7 +556,9 @@ mod tests {
             Config::default()
         );
         assert_eq!(
-            from_json("{\"accounts\":[{\"id\":\"a1\",\"name\":\"x\"},{\"id\":\"../x\",\"name\":\"y\"}]}"),
+            from_json(
+                "{\"accounts\":[{\"id\":\"a1\",\"name\":\"x\"},{\"id\":\"../x\",\"name\":\"y\"}]}"
+            ),
             Config::default()
         );
     }

@@ -35,6 +35,15 @@ Tauri's native multi-WebView support requires the Rust `unstable` feature on des
 
 Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, not on Facebook login pages or other origins.
 
+## Multiple accounts
+
+Settings > Accounts runs up to four Messenger accounts at once.
+
+- **Layouts:** *Separate windows* gives each account its own window (the main window is the first account; the others start hidden, open them from Settings or the tray **Accounts** menu, and they line up side by side when the screen is wide enough). *Split panes* shows two accounts side by side in the main window; drag the divider, each pane keeps at least 480 px and the window never gets narrower than 966 px. At that width Messenger switches to its narrow layout: click a conversation to open it, use the left arrow to return to the list. Split supports up to two accounts.
+- **Data:** the first account keeps the existing login. Others store their profile in `accounts/<id>` under the app's local data folder; removing an account deletes it.
+- **Notifications:** toasts, unread counts and the tray tooltip are tracked per account; the badge and tooltip show the total.
+- **Costs:** every account keeps its own WebView2 process, so memory use grows with the account count. Messenger may ask for extra verification when several accounts are active (unverified).
+
 ## Notifications and unread badges
 
 - Messenger's browser notifications remain the primary source. If WebView2 rejects a notification that Messenger already has permission to display, the app attempts to show it through the native OS notification service. It does not override a denied browser permission.
