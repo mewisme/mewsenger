@@ -28,3 +28,6 @@ coverage
 /key
 /key.pub.bak
 src-tauri/key
+
+# Local notes
+/docs/

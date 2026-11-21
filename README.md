@@ -71,8 +71,8 @@ Settings > Accounts runs up to four Messenger accounts at once.
 - **No upload progress.** WebView2 offers no official upload callback and wrapping `fetch`/`XMLHttpRequest` would touch Messenger request bodies, which the app avoids.
 - **No download percentage.** Tauri reports only that a download started and finished; the status bar shows the file name and a final state.
 - **Toast removal** works only for toasts created by this app through Windows' own notification API. Toasts shown by the plugin fallback cannot be removed individually. Quick reply from a toast is implemented but disabled until it has been verified against a live session.
-- **Hide typing indicator, conversation preloading, Messenger preferences and call permissions** depend on probes of a live session (`docs/probes/`). All rows are currently `untested`, so none of these features exist yet.
-- The app's own windows follow the operating system theme; whether Messenger's page follows it is untested (see `docs/probes/messenger-settings-and-calls.md`), and the app has no separate theme switch.
+- **Hide typing indicator, conversation preloading, Messenger preferences and call permissions** depend on probes of a live session. All rows are currently `untested`, so none of these features exist yet.
+- The app's own windows follow the operating system theme; whether Messenger's page follows it is untested, and the app has no separate theme switch.
 
 ## Prerequisites
 
