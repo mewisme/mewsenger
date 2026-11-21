@@ -5,7 +5,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, EventTarget, Manager, State, Url, Webview};
+use tauri::{AppHandle, Manager, State, Url, Webview};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::toast;
@@ -34,8 +34,6 @@ fn notification_text(preview: bool, title: String, body: String) -> (String, Str
 pub struct NotificationState {
     seen: HashMap<String, Instant>,
     rate: VecDeque<Instant>,
-    pending: HashMap<i32, PendingToast>,
-    next_toast_id: i32,
     unread: Option<usize>,
     session: Option<bool>,
     replying: HashMap<String, String>,
@@ -52,8 +50,51 @@ impl NotificationState {
 }
 
 struct PendingToast {
+    account: String,
     thread: String,
     created: Instant,
+}
+
+/// Per-account notification state plus the toast ids, which stay unique
+/// across accounts because the plugin fallback keys on the numeric id alone.
+#[derive(Default)]
+pub struct Registry {
+    accounts: HashMap<String, NotificationState>,
+    pending: HashMap<i32, PendingToast>,
+    next_toast_id: i32,
+}
+
+impl Registry {
+    pub fn state(&mut self, account: &str) -> &mut NotificationState {
+        self.accounts.entry(account.to_string()).or_default()
+    }
+
+    pub fn get(&self, account: &str) -> Option<&NotificationState> {
+        self.accounts.get(account)
+    }
+
+    /// Sum of the unread counts that are known; unknown accounts add nothing.
+    pub fn total_unread(&self) -> usize {
+        self.accounts.values().filter_map(|s| s.unread).sum()
+    }
+
+    fn next_id(&self) -> i32 {
+        self.next_toast_id.checked_add(1).unwrap_or(1)
+    }
+
+    fn trim_pending(&mut self, now: Instant) {
+        self.pending
+            .retain(|_, toast| now.duration_since(toast.created) < TOAST_LIFETIME);
+        if self.pending.len() > 128 {
+            self.pending.clear();
+        }
+    }
+
+    /// Drops everything known about an account that no longer exists.
+    pub fn forget(&mut self, account: &str) {
+        self.accounts.remove(account);
+        self.pending.retain(|_, toast| toast.account != account);
+    }
 }
 
 const TOAST_LIFETIME: Duration = Duration::from_secs(600);
@@ -73,21 +114,25 @@ fn thread_url(thread: &str) -> Option<Url> {
     crate::site::current().thread_url(thread)
 }
 
-fn clear_thread(state: &mut NotificationState, thread: &str) {
-    state.pending.retain(|_, toast| toast.thread != thread);
+fn clear_thread(registry: &mut Registry, account: &str, thread: &str) {
+    registry
+        .pending
+        .retain(|_, toast| toast.account != account || toast.thread != thread);
 }
 
-fn route_for_tap(state: &mut NotificationState, id: i32, now: Instant) -> Option<Url> {
-    let toast = state.pending.remove(&id)?;
-    (now.duration_since(toast.created) < TOAST_LIFETIME)
-        .then(|| thread_url(&toast.thread))
-        .flatten()
+fn route_for_tap(registry: &mut Registry, id: i32, now: Instant) -> Option<(String, Url)> {
+    let toast = registry.pending.remove(&id)?;
+    if now.duration_since(toast.created) >= TOAST_LIFETIME {
+        return None;
+    }
+    let url = thread_url(&toast.thread)?;
+    Some((toast.account, url))
 }
 
-pub fn clicked_thread(app: &AppHandle, id: i32) -> Option<Url> {
-    let state = app.try_state::<Mutex<NotificationState>>()?;
-    let mut state = state.lock().ok()?;
-    route_for_tap(&mut state, id, Instant::now())
+pub fn clicked_thread(app: &AppHandle, id: i32) -> Option<(String, Url)> {
+    let registry = app.try_state::<Mutex<Registry>>()?;
+    let mut registry = registry.lock().ok()?;
+    route_for_tap(&mut registry, id, Instant::now())
 }
 
 /// Inline reply from a toast stays off until it has been confirmed against a
@@ -97,18 +142,20 @@ const REPLY_FAILED_NOTICE: &str = "Reply not sent; open Messenger";
 const MAX_REPLY_CHARS: usize = 2000;
 const MAX_PENDING_REPLIES: usize = 16;
 
-fn toast_tag(id: i32) -> String {
-    format!("toast-{id}")
+fn toast_tag(account: &str, id: i32) -> String {
+    format!("toast-{account}-{id}")
 }
 
-fn parse_toast_tag(tag: &str) -> Option<i32> {
-    tag.strip_prefix("toast-")?.parse().ok()
+fn parse_toast_tag(tag: &str) -> Option<(String, i32)> {
+    let (account, id) = tag.strip_prefix("toast-")?.split_once('-')?;
+    crate::accounts::account_of(&crate::accounts::remote_label(account))?;
+    Some((account.to_string(), id.parse().ok()?))
 }
 
 /// Action Center group for one conversation; empty when it would not fit.
-fn thread_group(thread: Option<&str>) -> String {
+fn thread_group(account: &str, thread: Option<&str>) -> String {
     thread
-        .map(|thread| format!("thread-{thread}"))
+        .map(|thread| format!("{account}-thread-{thread}"))
         .filter(|group| group.chars().count() <= 64)
         .unwrap_or_default()
 }
@@ -123,14 +170,16 @@ fn validate_reply(text: &str) -> Option<String> {
     valid.then(|| text.to_string())
 }
 
-/// Conversation a still-valid toast belongs to. Does not consume the mapping.
-fn reply_target(state: &NotificationState, id: i32, now: Instant) -> Option<String> {
-    let toast = state.pending.get(&id)?;
-    (now.duration_since(toast.created) < TOAST_LIFETIME).then(|| toast.thread.clone())
+/// Account and conversation a still-valid toast belongs to. Does not consume
+/// the mapping.
+fn reply_target(registry: &Registry, id: i32, now: Instant) -> Option<(String, String)> {
+    let toast = registry.pending.get(&id)?;
+    (now.duration_since(toast.created) < TOAST_LIFETIME)
+        .then(|| (toast.account.clone(), toast.thread.clone()))
 }
 
-fn main_in_background(app: &AppHandle) -> bool {
-    app.get_window("main").is_none_or(|window| {
+fn in_background(app: &AppHandle, account: &str) -> bool {
+    crate::accounts::host_window(app, account).is_none_or(|window| {
         !window.is_visible().unwrap_or(true) || !window.is_focused().unwrap_or(true)
     })
 }
@@ -149,6 +198,7 @@ fn notice(app: &AppHandle, body: &str) {
 /// removed per conversation), otherwise through the notification plugin.
 fn deliver(
     app: &AppHandle,
+    account: &str,
     toast_id: i32,
     group: String,
     title: String,
@@ -157,7 +207,7 @@ fn deliver(
 ) -> Result<(), String> {
     let handler_app = app.clone();
     let request = toast::ToastRequest {
-        tag: toast_tag(toast_id),
+        tag: toast_tag(account, toast_id),
         group,
         title: title.clone(),
         body: body.clone(),
@@ -185,8 +235,8 @@ fn deliver(
 fn handle_toast_event(app: &AppHandle, event: toast::ToastEvent) {
     match event {
         toast::ToastEvent::Opened { tag } => {
-            if let Some(id) = parse_toast_tag(&tag) {
-                crate::desktop::activate_toast(app, id);
+            if let Some((account, id)) = parse_toast_tag(&tag) {
+                crate::desktop::activate_toast(app, &account, id);
             }
         }
         toast::ToastEvent::Reply { tag, text } => quick_reply(app, &tag, &text),
@@ -195,13 +245,13 @@ fn handle_toast_event(app: &AppHandle, event: toast::ToastEvent) {
 }
 
 fn quick_reply(app: &AppHandle, tag: &str, text: &str) {
-    let (Some(id), Some(text)) = (parse_toast_tag(tag), validate_reply(text)) else {
+    let (Some((account, id)), Some(text)) = (parse_toast_tag(tag), validate_reply(text)) else {
         return;
     };
-    let Some(state) = app.try_state::<Mutex<NotificationState>>() else {
+    let Some(registry) = app.try_state::<Mutex<Registry>>() else {
         return;
     };
-    let Some(webview) = app.get_webview("messenger") else {
+    let Some(webview) = app.get_webview(&crate::accounts::remote_label(&account)) else {
         return;
     };
     if !webview
@@ -212,12 +262,16 @@ fn quick_reply(app: &AppHandle, tag: &str, text: &str) {
     }
     let nonce = tag.to_string();
     let thread = {
-        let Ok(mut state) = state.lock() else {
+        let Ok(mut registry) = registry.lock() else {
             return;
         };
-        let Some(thread) = reply_target(&state, id, Instant::now()) else {
+        let Some((owner, thread)) = reply_target(&registry, id, Instant::now()) else {
             return;
         };
+        if owner != account {
+            return;
+        }
+        let state = registry.state(&account);
         if state.replying.len() >= MAX_PENDING_REPLIES {
             return;
         }
@@ -231,8 +285,8 @@ fn quick_reply(app: &AppHandle, tag: &str, text: &str) {
             .is_ok()
     });
     if !delivered {
-        if let Ok(mut state) = state.lock() {
-            state.replying.remove(&nonce);
+        if let Ok(mut registry) = registry.lock() {
+            registry.state(&account).replying.remove(&nonce);
         }
         notice(app, REPLY_FAILED_NOTICE);
     }
@@ -240,25 +294,24 @@ fn quick_reply(app: &AppHandle, tag: &str, text: &str) {
 
 #[derive(Clone, Serialize)]
 pub struct DesktopStatus {
+    account: String,
     unread_count: Option<usize>,
     session: Option<bool>,
 }
 
 fn trusted_status_view(webview: &Webview) -> bool {
-    webview.label() == "status"
-        && webview.window().label() == "main"
-        && webview
-            .url()
-            .is_ok_and(|url| crate::shell::local_asset_url(&url))
+    crate::shell::local_webview(webview, &[crate::shell::LocalKind::Status])
 }
 
 #[tauri::command]
 pub fn test_notification(app: AppHandle, webview: Webview) -> Result<(), String> {
-    if !crate::shell::local_webview(&webview, &[crate::shell::STATUS, "settings"]) {
+    use crate::shell::LocalKind;
+    if !crate::shell::local_webview(&webview, &[LocalKind::Status, LocalKind::Settings]) {
         return Err("local view required".into());
     }
     deliver(
         &app,
+        crate::accounts::FIRST,
         0,
         "test".into(),
         "Messenger notification test".into(),
@@ -268,12 +321,18 @@ pub fn test_notification(app: AppHandle, webview: Webview) -> Result<(), String>
     .map_err(|_| "Windows notification request failed".into())
 }
 
-fn publish_status(app: &AppHandle, unread_count: Option<usize>, session: Option<bool>) {
+fn publish_status(
+    app: &AppHandle,
+    account: &str,
+    unread_count: Option<usize>,
+    session: Option<bool>,
+) {
     // Do not send thread IDs, notification bodies, or account data to local UI.
-    let _ = app.emit_to(
-        EventTarget::webview("status"),
+    crate::shell::emit_status(
+        app,
         "desktop-status",
         DesktopStatus {
+            account: account.to_string(),
             unread_count,
             session,
         },
@@ -282,17 +341,27 @@ fn publish_status(app: &AppHandle, unread_count: Option<usize>, session: Option<
 
 #[tauri::command]
 pub fn current_status(
+    app: AppHandle,
     webview: Webview,
-    state: State<'_, Mutex<NotificationState>>,
-) -> Result<DesktopStatus, String> {
+    registry: State<'_, Mutex<Registry>>,
+) -> Result<Vec<DesktopStatus>, String> {
     if !trusted_status_view(&webview) {
         return Err("local status view required".into());
     }
-    let state = state.lock().map_err(|_| "status unavailable")?;
-    Ok(DesktopStatus {
-        unread_count: state.unread,
-        session: state.session,
-    })
+    let config = crate::accounts::snapshot(&app);
+    let registry = registry.lock().map_err(|_| "status unavailable")?;
+    Ok(config
+        .accounts
+        .iter()
+        .map(|account| {
+            let state = registry.get(&account.id);
+            DesktopStatus {
+                account: account.id.clone(),
+                unread_count: state.and_then(|s| s.unread),
+                session: state.and_then(|s| s.session),
+            }
+        })
+        .collect())
 }
 
 #[derive(Deserialize)]
@@ -321,11 +390,14 @@ pub enum MessageEvent {
         ok: bool,
         reason: Option<String>,
     },
+    Focus,
     Reset,
 }
 
 pub(crate) fn trusted(url: &Url, label: &str) -> bool {
-    label == "messenger" && crate::site::current().is_app_origin(url)
+    label.starts_with("messenger-")
+        && crate::accounts::account_of(label).is_some()
+        && crate::site::current().is_app_origin(url)
 }
 
 fn safe_string(value: &str, max: usize) -> Option<&str> {
@@ -353,16 +425,11 @@ fn trim_history(state: &mut NotificationState, now: Instant) {
     {
         state.rate.pop_front();
     }
-    state
-        .pending
-        .retain(|_, toast| now.duration_since(toast.created) < TOAST_LIFETIME);
-    if state.pending.len() > 128 {
-        state.pending.clear();
-    }
 }
 
-fn reset_view_state(state: &mut NotificationState) {
-    state.pending.clear();
+fn reset_view_state(registry: &mut Registry, account: &str) {
+    registry.pending.retain(|_, toast| toast.account != account);
+    let state = registry.state(account);
     state.unread = None;
     state.session = None;
     // Keep deduplication and rate limits across navigation and page reloads.
@@ -471,18 +538,28 @@ fn badge(app: &AppHandle, count: usize) {
 pub fn notification_event(
     app: AppHandle,
     webview: Webview,
-    state: State<'_, Mutex<NotificationState>>,
+    registry: State<'_, Mutex<Registry>>,
     prefs: State<'_, Mutex<crate::prefs::Prefs>>,
     event: MessageEvent,
 ) -> Result<(), String> {
     let current = webview.url().map_err(|_| "origin unavailable")?;
-    if webview.window().label() != "main" || !trusted(&current, webview.label()) {
+    let account = crate::accounts::account_of(webview.label())
+        .ok_or("origin not permitted")?
+        .to_string();
+    let window_label = webview.window().label().to_string();
+    if !trusted(&current, webview.label())
+        || (window_label != "main" && window_label != crate::accounts::window_label(&account))
+    {
         return Err("origin not permitted".into());
     }
     let now = Instant::now();
-    let mut notifications = state.lock().map_err(|_| "notification state unavailable")?;
-    trim_history(&mut notifications, now);
+    let mut registry = registry
+        .lock()
+        .map_err(|_| "notification state unavailable")?;
+    registry.trim_pending(now);
+    trim_history(registry.state(&account), now);
     let mut status_change = false;
+    let mut unread_change = false;
     match event {
         MessageEvent::Notify {
             id,
@@ -496,29 +573,44 @@ pub fn notification_event(
             if let Some(thread) = &thread_id {
                 safe_string(thread, 160).ok_or("invalid conversation id")?;
             }
-            if notifications.seen.contains_key(&id) {
-                return Ok(());
-            }
-            // Even a compromised page must not flood Windows notification center.
-            if notifications.rate.len() >= MAX_TOASTS_PER_MINUTE {
-                return Ok(());
+            {
+                let state = registry.state(&account);
+                if state.seen.contains_key(&id) {
+                    return Ok(());
+                }
+                // Even a compromised page must not flood Windows notification center.
+                if state.rate.len() >= MAX_TOASTS_PER_MINUTE {
+                    return Ok(());
+                }
             }
             let preview = prefs.lock().map(|p| p.notification_preview).unwrap_or(true);
             let (title, body) = notification_text(preview, title, body);
-            let toast_id = notifications.next_toast_id.checked_add(1).unwrap_or(1);
+            let toast_id = registry.next_id();
             // Messenger can create its own browser toast. Only the JS fallback
             // reports notifications that require desktop delivery.
             let routable = thread_id.as_deref().filter(|t| routable_thread(t));
-            let reply = QUICK_REPLY && routable.is_some() && main_in_background(&app);
-            deliver(&app, toast_id, thread_group(routable), title, body, reply)?;
-            notifications.next_toast_id = toast_id;
-            notifications.seen.insert(id.clone(), now);
-            notifications.rate.push_back(now);
+            let reply = QUICK_REPLY && routable.is_some() && in_background(&app, &account);
+            deliver(
+                &app,
+                &account,
+                toast_id,
+                thread_group(&account, routable),
+                title,
+                body,
+                reply,
+            )?;
+            registry.next_toast_id = toast_id;
+            {
+                let state = registry.state(&account);
+                state.seen.insert(id.clone(), now);
+                state.rate.push_back(now);
+            }
             if let Some(thread) = thread_id {
                 if routable_thread(&thread) {
-                    notifications.pending.insert(
+                    registry.pending.insert(
                         toast_id,
                         PendingToast {
+                            account: account.clone(),
                             thread,
                             created: now,
                         },
@@ -538,25 +630,28 @@ pub fn notification_event(
                 .into_iter()
                 .collect::<std::collections::HashSet<_>>();
             let count = unique.len();
-            if notifications.unread != Some(count) {
-                notifications.unread = Some(count);
-                badge(&app, count);
-                crate::desktop::set_tray_tooltip(&app, count);
+            let state = registry.state(&account);
+            if state.unread != Some(count) {
+                state.unread = Some(count);
+                unread_change = true;
                 status_change = true;
             }
         }
         MessageEvent::NewUnread { thread_id } => {
-            let window = app.get_window("main").ok_or("main window unavailable")?;
+            let window =
+                crate::accounts::host_window(&app, &account).ok_or("account window unavailable")?;
             let in_background =
                 !window.is_visible().unwrap_or(true) || !window.is_focused().unwrap_or(true);
-            if !should_show_background_unread(&notifications, &thread_id, in_background) {
+            if !should_show_background_unread(registry.state(&account), &thread_id, in_background) {
                 return Ok(());
             }
-            let toast_id = notifications.next_toast_id.checked_add(1).unwrap_or(1);
+            let toast_id = registry.next_id();
             deliver(
                 &app,
+                &account,
                 toast_id,
                 thread_group(
+                    &account,
                     Some(&thread_id)
                         .filter(|t| routable_thread(t))
                         .map(|t| t.as_str()),
@@ -565,14 +660,16 @@ pub fn notification_event(
                 "New unread conversation".into(),
                 false,
             )?;
-            notifications.next_toast_id = toast_id;
-            notifications
-                .seen
-                .insert(format!("unread:{thread_id}"), now);
-            notifications.rate.push_back(now);
-            notifications.pending.insert(
+            registry.next_toast_id = toast_id;
+            {
+                let state = registry.state(&account);
+                state.seen.insert(format!("unread:{thread_id}"), now);
+                state.rate.push_back(now);
+            }
+            registry.pending.insert(
                 toast_id,
                 PendingToast {
+                    account: account.clone(),
                     thread: thread_id,
                     created: now,
                 },
@@ -582,14 +679,13 @@ pub fn notification_event(
             safe_string(&thread_id, 160).ok_or("invalid conversation id")?;
             // Stop routing this thread's stale notifications and remove its
             // delivered toasts from Action Center (Windows toasts we created).
-            clear_thread(&mut notifications, &thread_id);
-            toast::remove_group(&app, &format!("thread-{thread_id}"));
+            clear_thread(&mut registry, &account, &thread_id);
+            remove_thread_toasts(&app, &account, &thread_id);
         }
         MessageEvent::Reset => {
-            reset_view_state(&mut notifications);
-            toast::clear_all(&app);
-            badge(&app, 0);
-            crate::desktop::set_tray_tooltip(&app, 0);
+            reset_view_state(&mut registry, &account);
+            toast::clear_account(&app, &account);
+            unread_change = true;
             status_change = true;
         }
         MessageEvent::ReplyResult { nonce, ok, reason } => {
@@ -597,10 +693,10 @@ pub fn notification_event(
             if let Some(reason) = &reason {
                 safe_string(reason, 40).ok_or("invalid reply reason")?;
             }
-            if let Some(thread) = notifications.replying.remove(&nonce) {
+            if let Some(thread) = registry.state(&account).replying.remove(&nonce) {
                 if ok {
-                    clear_thread(&mut notifications, &thread);
-                    toast::remove_group(&app, &format!("thread-{thread}"));
+                    clear_thread(&mut registry, &account, &thread);
+                    remove_thread_toasts(&app, &account, &thread);
                 } else {
                     notice(&app, REPLY_FAILED_NOTICE);
                 }
@@ -608,18 +704,58 @@ pub fn notification_event(
         }
         MessageEvent::Session { state } => {
             let signed_in = parse_session(&state)?;
-            if notifications.session != Some(signed_in) {
-                notifications.session = Some(signed_in);
+            let state = registry.state(&account);
+            if state.session != Some(signed_in) {
+                state.session = Some(signed_in);
                 status_change = true;
             }
         }
+        MessageEvent::Focus => {
+            if let Some(active) = app.try_state::<crate::accounts::ActiveAccount>() {
+                if let Ok(mut active) = active.0.lock() {
+                    *active = account.clone();
+                }
+            }
+        }
     }
-    let snapshot = (notifications.unread, notifications.session);
-    drop(notifications);
+    let (unread, session) = {
+        let state = registry.state(&account);
+        (state.unread, state.session)
+    };
+    let total = registry.total_unread();
+    drop(registry);
+    if unread_change {
+        badge(&app, total);
+        crate::desktop::set_tray_tooltip(&app, total);
+    }
     if status_change {
-        publish_status(&app, snapshot.0, snapshot.1);
+        publish_status(&app, &account, unread, session);
     }
     Ok(())
+}
+
+fn remove_thread_toasts(app: &AppHandle, account: &str, thread: &str) {
+    let group = thread_group(account, Some(thread));
+    if !group.is_empty() {
+        toast::remove_group(app, &group);
+    }
+}
+
+/// Drops everything held for a removed account and refreshes the totals.
+pub fn account_removed(app: &AppHandle, account: &str) {
+    toast::clear_account(app, account);
+    let Some(registry) = app.try_state::<Mutex<Registry>>() else {
+        return;
+    };
+    let total = {
+        let Ok(mut registry) = registry.lock() else {
+            return;
+        };
+        registry.forget(account);
+        registry.total_unread()
+    };
+    badge(app, total);
+    crate::desktop::set_tray_tooltip(app, total);
 }
 
 #[cfg(test)]
@@ -637,27 +773,38 @@ mod tests {
             ("Messenger".to_string(), "New message".to_string())
         );
     }
+    fn pend(registry: &mut Registry, id: i32, account: &str, thread: &str, created: Instant) {
+        registry.pending.insert(
+            id,
+            PendingToast {
+                account: account.into(),
+                thread: thread.into(),
+                created,
+            },
+        );
+    }
+
     #[test]
-    fn only_messenger_https_in_the_main_window_is_trusted() {
-        assert!(trusted(
-            &Url::parse("https://www.messenger.com/t/12").unwrap(),
-            "messenger"
-        ));
+    fn only_messenger_https_in_an_account_webview_is_trusted() {
+        let ok = Url::parse("https://www.messenger.com/t/12").unwrap();
+        assert!(trusted(&ok, "messenger-a1"));
+        assert!(trusted(&ok, "messenger-a2"));
+        assert!(!trusted(&ok, "messenger"));
+        assert!(!trusted(&ok, "messenger-a1x"));
+        assert!(!trusted(&ok, "messenger-../x"));
+        assert!(!trusted(&ok, "titlebar-a1"));
+        assert!(!trusted(&ok, "popup-1"));
         assert!(!trusted(
             &Url::parse("http://www.messenger.com/").unwrap(),
-            "messenger"
+            "messenger-a1"
         ));
         assert!(!trusted(
             &Url::parse("https://www.messenger.com.evil.org/").unwrap(),
-            "messenger"
-        ));
-        assert!(!trusted(
-            &Url::parse("https://www.messenger.com/").unwrap(),
-            "popup-1"
+            "messenger-a1"
         ));
         assert!(!trusted(
             &Url::parse("https://www.messenger.com:444/").unwrap(),
-            "messenger"
+            "messenger-a1"
         ));
     }
     #[test]
@@ -683,52 +830,80 @@ mod tests {
 
     #[test]
     fn resetting_a_page_cannot_reset_toast_deduplication_or_rate_limits() {
-        let mut state = NotificationState::default();
+        let mut registry = Registry::default();
         let now = Instant::now();
+        let state = registry.state("a1");
         state.seen.insert("tag:one".into(), now);
         state.rate.push_back(now);
-        state.pending.insert(
-            7,
-            PendingToast {
-                thread: "thread".into(),
-                created: now,
-            },
-        );
         state.unread = Some(2);
-        reset_view_state(&mut state);
+        pend(&mut registry, 7, "a1", "thread", now);
+        reset_view_state(&mut registry, "a1");
+        let state = registry.state("a1");
         assert_eq!(state.unread, None);
-        assert!(state.pending.is_empty());
         assert_eq!(state.seen.len(), 1);
         assert_eq!(state.rate.len(), 1);
+        assert!(registry.pending.is_empty());
+    }
+
+    #[test]
+    fn resetting_one_account_leaves_the_other_alone() {
+        let mut registry = Registry::default();
+        let now = Instant::now();
+        registry.state("a1").unread = Some(2);
+        registry.state("a2").unread = Some(5);
+        registry.state("a2").session = Some(true);
+        pend(&mut registry, 1, "a1", "t", now);
+        pend(&mut registry, 2, "a2", "t", now);
+        reset_view_state(&mut registry, "a1");
+        assert_eq!(registry.state("a1").unread, None);
+        assert_eq!(registry.state("a2").unread, Some(5));
+        assert_eq!(registry.state("a2").session, Some(true));
+        assert!(registry.pending.contains_key(&2));
+        assert!(!registry.pending.contains_key(&1));
+    }
+
+    #[test]
+    fn total_unread_sums_only_known_counts() {
+        let mut registry = Registry::default();
+        assert_eq!(registry.total_unread(), 0);
+        registry.state("a1").unread = Some(2);
+        registry.state("a2");
+        registry.state("a3").unread = Some(4);
+        assert_eq!(registry.total_unread(), 6);
+        registry.forget("a3");
+        assert_eq!(registry.total_unread(), 2);
+    }
+
+    #[test]
+    fn toast_ids_stay_unique_across_accounts() {
+        let mut registry = Registry::default();
+        let now = Instant::now();
+        let mut ids = Vec::new();
+        for account in ["a1", "a2", "a1", "a2"] {
+            let id = registry.next_id();
+            registry.next_toast_id = id;
+            pend(&mut registry, id, account, "t", now);
+            ids.push(id);
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), 4);
+        assert_eq!(registry.pending.len(), 4);
     }
 
     #[test]
     fn click_routes_only_live_mapped_threads_and_consumes_the_match() {
         let now = Instant::now();
-        let mut state = NotificationState::default();
-        state.pending.insert(
-            4,
-            PendingToast {
-                thread: "123".into(),
-                created: now,
-            },
-        );
-        state.pending.insert(
-            5,
-            PendingToast {
-                thread: "456".into(),
-                created: now,
-            },
-        );
-        assert_eq!(
-            route_for_tap(&mut state, 4, now).unwrap().as_str(),
-            "https://www.messenger.com/t/123"
-        );
-        assert!(route_for_tap(&mut state, 4, now).is_none());
-        assert_eq!(
-            route_for_tap(&mut state, 5, now).unwrap().as_str(),
-            "https://www.messenger.com/t/456"
-        );
+        let mut registry = Registry::default();
+        pend(&mut registry, 4, "a1", "123", now);
+        pend(&mut registry, 5, "a2", "456", now);
+        let (account, url) = route_for_tap(&mut registry, 4, now).unwrap();
+        assert_eq!(account, "a1");
+        assert_eq!(url.as_str(), "https://www.messenger.com/t/123");
+        assert!(route_for_tap(&mut registry, 4, now).is_none());
+        let (account, url) = route_for_tap(&mut registry, 5, now).unwrap();
+        assert_eq!(account, "a2");
+        assert_eq!(url.as_str(), "https://www.messenger.com/t/456");
     }
 
     #[test]
@@ -745,17 +920,35 @@ mod tests {
 
     #[test]
     fn toast_tags_round_trip_and_reject_other_shapes() {
-        assert_eq!(parse_toast_tag(&toast_tag(17)), Some(17));
-        assert_eq!(parse_toast_tag("toast-x"), None);
-        assert_eq!(parse_toast_tag("17"), None);
-        assert_eq!(parse_toast_tag("thread-17"), None);
+        assert_eq!(
+            parse_toast_tag(&toast_tag("a2", 17)),
+            Some(("a2".into(), 17))
+        );
+        assert_eq!(parse_toast_tag("toast-a1-0"), Some(("a1".into(), 0)));
+        for bad in [
+            "toast-x",
+            "toast-17",
+            "toast-a1",
+            "toast-a1-x",
+            "toast--5",
+            "toast-b1-5",
+            "toast-a1x-5",
+            "17",
+            "thread-17",
+        ] {
+            assert_eq!(parse_toast_tag(bad), None, "{bad}");
+        }
     }
 
     #[test]
-    fn group_is_per_conversation_and_dropped_when_too_long() {
-        assert_eq!(thread_group(Some("123")), "thread-123");
-        assert_eq!(thread_group(None), "");
-        assert_eq!(thread_group(Some(&"x".repeat(60))), "");
+    fn group_is_per_account_and_conversation_and_dropped_when_too_long() {
+        assert_eq!(thread_group("a1", Some("123")), "a1-thread-123");
+        assert_ne!(
+            thread_group("a1", Some("123")),
+            thread_group("a2", Some("123"))
+        );
+        assert_eq!(thread_group("a1", None), "");
+        assert_eq!(thread_group("a1", Some(&"x".repeat(60))), "");
     }
 
     #[test]
@@ -790,76 +983,55 @@ mod tests {
     #[test]
     fn reply_only_reaches_a_live_mapped_thread_and_keeps_the_mapping() {
         let now = Instant::now();
-        let mut state = NotificationState::default();
-        state.pending.insert(
-            3,
-            PendingToast {
-                thread: "123".into(),
-                created: now,
-            },
-        );
-        assert_eq!(reply_target(&state, 3, now).as_deref(), Some("123"));
-        assert_eq!(reply_target(&state, 3, now).as_deref(), Some("123"));
-        assert!(reply_target(&state, 4, now).is_none());
-        assert!(reply_target(&state, 3, now + TOAST_LIFETIME).is_none());
+        let mut registry = Registry::default();
+        pend(&mut registry, 3, "a2", "123", now);
+        let expected = Some(("a2".to_string(), "123".to_string()));
+        assert_eq!(reply_target(&registry, 3, now), expected);
+        assert_eq!(reply_target(&registry, 3, now), expected);
+        assert!(reply_target(&registry, 4, now).is_none());
+        assert!(reply_target(&registry, 3, now + TOAST_LIFETIME).is_none());
     }
 
     #[test]
     fn reading_one_thread_preserves_unrelated_click_targets() {
         let now = Instant::now();
-        let mut state = NotificationState::default();
-        state.pending.insert(
-            1,
-            PendingToast {
-                thread: "one".into(),
-                created: now,
-            },
-        );
-        state.pending.insert(
-            2,
-            PendingToast {
-                thread: "one".into(),
-                created: now,
-            },
-        );
-        state.pending.insert(
-            3,
-            PendingToast {
-                thread: "two".into(),
-                created: now,
-            },
-        );
-        clear_thread(&mut state, "one");
-        assert!(route_for_tap(&mut state, 1, now).is_none());
-        assert!(route_for_tap(&mut state, 2, now).is_none());
-        assert!(route_for_tap(&mut state, 3, now).is_some());
+        let mut registry = Registry::default();
+        pend(&mut registry, 1, "a1", "one", now);
+        pend(&mut registry, 2, "a1", "one", now);
+        pend(&mut registry, 3, "a1", "two", now);
+        pend(&mut registry, 4, "a2", "one", now);
+        clear_thread(&mut registry, "a1", "one");
+        assert!(route_for_tap(&mut registry, 1, now).is_none());
+        assert!(route_for_tap(&mut registry, 2, now).is_none());
+        assert!(route_for_tap(&mut registry, 3, now).is_some());
+        // Same thread id in another account is a different conversation.
+        assert!(route_for_tap(&mut registry, 4, now).is_some());
     }
 
     #[test]
     fn rejects_stale_and_unroutable_notification_data() {
         let now = Instant::now();
-        let mut state = NotificationState::default();
-        state.pending.insert(
-            1,
-            PendingToast {
-                thread: "123".into(),
-                created: now - TOAST_LIFETIME,
-            },
-        );
-        state.pending.insert(
-            2,
-            PendingToast {
-                thread: "https://other.example/".into(),
-                created: now,
-            },
-        );
-        assert!(route_for_tap(&mut state, 1, now).is_none());
-        assert!(route_for_tap(&mut state, 2, now).is_none());
+        let mut registry = Registry::default();
+        pend(&mut registry, 1, "a1", "123", now - TOAST_LIFETIME);
+        pend(&mut registry, 2, "a1", "https://other.example/", now);
+        assert!(route_for_tap(&mut registry, 1, now).is_none());
+        assert!(route_for_tap(&mut registry, 2, now).is_none());
         assert!(thread_url("hello/world").is_none());
         assert_eq!(
             thread_url("fbid:123_A").unwrap().host_str(),
             Some("www.messenger.com")
         );
+    }
+
+    #[test]
+    fn expired_toasts_are_trimmed_per_registry() {
+        let now = Instant::now();
+        let mut registry = Registry::default();
+        pend(&mut registry, 1, "a1", "123", now - TOAST_LIFETIME);
+        pend(&mut registry, 2, "a2", "123", now);
+        registry.trim_pending(now);
+        assert_eq!(registry.pending.len(), 1);
+        assert!(registry.pending.contains_key(&2));
     }
 
     #[test]
@@ -891,21 +1063,14 @@ mod tests {
 
     #[test]
     fn leaving_messenger_returns_unread_and_session_to_unknown() {
-        let mut state = NotificationState {
-            unread: Some(3),
-            session: Some(true),
-            ..Default::default()
-        };
-        state.pending.insert(
-            1,
-            PendingToast {
-                thread: "123".into(),
-                created: Instant::now(),
-            },
-        );
-        reset_view_state(&mut state);
-        assert_eq!(state.unread, None);
-        assert_eq!(state.session, None);
-        assert!(state.pending.is_empty());
+        let mut registry = Registry::default();
+        let state = registry.state("a1");
+        state.unread = Some(3);
+        state.session = Some(true);
+        pend(&mut registry, 1, "a1", "123", Instant::now());
+        reset_view_state(&mut registry, "a1");
+        assert_eq!(registry.state("a1").unread, None);
+        assert_eq!(registry.state("a1").session, None);
+        assert!(registry.pending.is_empty());
     }
 }

@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{State, Webview};
 
-use crate::{notifications::NotificationState, updater::UpdateState};
+use crate::{notifications::Registry, updater::UpdateState};
 
 /// Support information that is safe to paste into a bug report: no paths, no
 /// URLs and no account or message data.
@@ -23,15 +23,22 @@ pub struct Diagnostics {
 pub fn get_diagnostics(
     app: tauri::AppHandle,
     webview: Webview,
-    notifications: State<'_, Mutex<NotificationState>>,
+    notifications: State<'_, Mutex<Registry>>,
     update: State<'_, Mutex<UpdateState>>,
 ) -> Result<Diagnostics, String> {
-    if !crate::shell::local_webview(&webview, &[crate::shell::STATUS, "settings"]) {
+    use crate::shell::LocalKind;
+    if !crate::shell::local_webview(&webview, &[LocalKind::Status, LocalKind::Settings]) {
         return Err("local view required".into());
     }
     let (session, unread_known) = notifications
         .lock()
-        .map(|state| (state.session(), state.unread().is_some()))
+        .map(|registry| {
+            let state = registry.get(crate::accounts::FIRST);
+            (
+                state.and_then(|s| s.session()),
+                state.is_some_and(|s| s.unread().is_some()),
+            )
+        })
         .map_err(|_| "status unavailable")?;
     let update_state = update
         .lock()

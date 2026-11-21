@@ -66,9 +66,8 @@ pub fn set(app: &AppHandle, key: &str, value: bool) -> Result<Prefs, String> {
     if let Some(item) = app.try_state::<PreviewMenuItem>() {
         let _ = item.0.set_checked(next.notification_preview);
     }
-    for label in [crate::shell::STATUS, "settings"] {
-        let _ = app.emit_to(label, "prefs-changed", next);
-    }
+    crate::shell::emit_status(app, "prefs-changed", next);
+    let _ = app.emit_to("settings", "prefs-changed", next);
     Ok(next)
 }
 

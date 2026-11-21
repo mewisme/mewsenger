@@ -292,7 +292,7 @@ test('only the scoped Messenger command is granted to remote content', () => {
   const settings = JSON.parse(fs.readFileSync(
     new URL('../capabilities/messenger-notifications.json', import.meta.url), 'utf8'));
   assert.equal(settings.local, false);
-  assert.deepEqual(settings.webviews, ['messenger']);
+  assert.deepEqual(settings.webviews, ['messenger-*']);
   assert.equal(settings.windows, undefined);
   assert.deepEqual(settings.permissions, ['allow-notification-event']);
   assert.deepEqual(
@@ -301,7 +301,7 @@ test('only the scoped Messenger command is granted to remote content', () => {
   );
   const local = JSON.parse(fs.readFileSync(
     new URL('../capabilities/default.json', import.meta.url), 'utf8'));
-  assert.deepEqual(local.webviews, ['status']);
+  assert.deepEqual(local.webviews, ['status-*']);
   assert.equal(local.windows, undefined);
   assert.deepEqual(local.permissions, [
     'core:default', 'allow-show-settings', 'allow-current-status',
@@ -312,11 +312,11 @@ test('only the scoped Messenger command is granted to remote content', () => {
     new URL('../capabilities/desktop.json', import.meta.url), 'utf8'));
   const config = JSON.parse(fs.readFileSync(
     new URL('../tauri.conf.json', import.meta.url), 'utf8'));
-  assert.deepEqual(desktop.webviews, ['status']);
+  assert.deepEqual(desktop.webviews, ['status-*']);
   assert.deepEqual(desktop.permissions, []);
   const titlebar = JSON.parse(fs.readFileSync(
     new URL('../capabilities/titlebar.json', import.meta.url), 'utf8'));
-  assert.deepEqual(titlebar.webviews, ['titlebar']);
+  assert.deepEqual(titlebar.webviews, ['titlebar-*']);
   assert.equal(titlebar.windows, undefined);
   assert.equal(titlebar.remote, undefined);
   assert.ok(titlebar.permissions.includes('core:window:allow-start-dragging'));

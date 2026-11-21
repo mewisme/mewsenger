@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
 pub const SPLIT: &str = "split";
@@ -253,6 +254,203 @@ pub fn mutate<T>(
     Ok((value, next))
 }
 
+/// Account whose Messenger page last reported window focus.
+pub struct ActiveAccount(pub Mutex<String>);
+
+impl Default for ActiveAccount {
+    fn default() -> Self {
+        Self(Mutex::new(FIRST.to_string()))
+    }
+}
+
+/// Window that shows an account: `main` in split layout, otherwise the
+/// account's own window.
+pub fn host_window(app: &AppHandle, account: &str) -> Option<tauri::Window> {
+    if snapshot(app).is_split() {
+        app.get_window("main")
+    } else {
+        app.get_window(&window_label(account))
+    }
+}
+
+/// Active account, or the first one when its page is gone.
+pub fn active_account(app: &AppHandle) -> String {
+    let active = app
+        .try_state::<ActiveAccount>()
+        .and_then(|a| a.0.lock().ok().map(|a| a.clone()))
+        .unwrap_or_else(|| FIRST.to_string());
+    if app.get_webview(&remote_label(&active)).is_some() {
+        active
+    } else {
+        FIRST.to_string()
+    }
+}
+
+/// Updates the split ratio in memory at once and writes it to disk once the
+/// drag has settled, so a drag does not rewrite the file on every frame.
+pub fn set_ratio_live(app: &AppHandle, ratio: f64) -> Result<(), String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static GENERATION: AtomicU64 = AtomicU64::new(0);
+    {
+        let state = app.state::<Mutex<Config>>();
+        let mut guard = state.lock().map_err(|_| "accounts unavailable")?;
+        guard.set_split_ratio(ratio)?;
+    }
+    let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if GENERATION.load(Ordering::Acquire) == generation {
+            if let Err(error) = save(&app, &snapshot(&app)) {
+                eprintln!("could not save accounts: {error}");
+            }
+        }
+    });
+    Ok(())
+}
+
+fn encode_component(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// Value of the `accounts` query parameter for local views: `id:name` pairs
+/// with the name escaped, joined by commas, then escaped as a whole.
+pub fn accounts_param(accounts: &[&Account]) -> String {
+    let inner = accounts
+        .iter()
+        .map(|a| format!("{}:{}", a.id, encode_component(&a.name)))
+        .collect::<Vec<_>>()
+        .join(",");
+    encode_component(&inner)
+}
+
+fn settings_view(webview: &tauri::Webview) -> Result<(), String> {
+    if crate::shell::local_webview(webview, &[crate::shell::LocalKind::Settings]) {
+        Ok(())
+    } else {
+        Err("settings view required".into())
+    }
+}
+
+/// Tells the settings window and every status bar that the list changed.
+fn announce(app: &AppHandle, config: &Config) {
+    crate::shell::emit_status(app, "accounts-changed", config);
+    let _ = app.emit_to("settings", "accounts-changed", config);
+}
+
+#[tauri::command]
+pub fn list_accounts(webview: tauri::Webview, app: AppHandle) -> Result<Config, String> {
+    settings_view(&webview)?;
+    Ok(snapshot(&app))
+}
+
+#[tauri::command]
+pub fn add_account(
+    app: AppHandle,
+    webview: tauri::Webview,
+    name: String,
+) -> Result<Config, String> {
+    settings_view(&webview)?;
+    let (_, config) = mutate(&app, |c| c.add(&name))?;
+    crate::desktop::sync_accounts_menu(&app);
+    announce(&app, &config);
+    crate::shell::apply_layout(&app, None, || {});
+    Ok(config)
+}
+
+#[tauri::command]
+pub fn rename_account(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+    name: String,
+) -> Result<Config, String> {
+    settings_view(&webview)?;
+    let (_, config) = mutate(&app, |c| c.rename(&id, &name))?;
+    if id != FIRST {
+        if let Some(window) = app.get_window(&window_label(&id)) {
+            let _ = window.set_title(&format!("Messenger - {}", config.name_of(&id)));
+        }
+    }
+    crate::desktop::sync_accounts_menu(&app);
+    announce(&app, &config);
+    Ok(config)
+}
+
+#[tauri::command]
+pub fn remove_account(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+) -> Result<Config, String> {
+    settings_view(&webview)?;
+    let (_, config) = mutate(&app, |c| c.remove(&id))?;
+    if let Some(active) = app.try_state::<ActiveAccount>() {
+        if let Ok(mut active) = active.0.lock() {
+            if *active == id {
+                *active = FIRST.to_string();
+            }
+        }
+    }
+    crate::desktop::sync_accounts_menu(&app);
+    announce(&app, &config);
+    let cleanup_app = app.clone();
+    crate::shell::apply_layout(&app, None, move || {
+        crate::notifications::account_removed(&cleanup_app, &id);
+        remove_data_directory(&cleanup_app, &id);
+    });
+    Ok(config)
+}
+
+/// WebView2 keeps profile files open for a moment after its views close, so
+/// deleting is retried; a leftover folder is logged, never an error.
+fn remove_data_directory(app: &AppHandle, id: &str) {
+    let Some(directory) = data_directory(app, id) else {
+        return;
+    };
+    for attempt in 0..5 {
+        match std::fs::remove_dir_all(&directory) {
+            Ok(()) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) if attempt == 4 => {
+                eprintln!("could not delete account data: {error}");
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(200)),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn set_layout(
+    app: AppHandle,
+    webview: tauri::Webview,
+    layout: Layout,
+) -> Result<Config, String> {
+    settings_view(&webview)?;
+    let (_, config) = mutate(&app, |c| c.set_layout(layout))?;
+    announce(&app, &config);
+    crate::shell::apply_layout(&app, None, || {});
+    Ok(config)
+}
+
+#[tauri::command]
+pub fn open_account(app: AppHandle, webview: tauri::Webview, id: String) -> Result<(), String> {
+    settings_view(&webview)?;
+    if snapshot(&app).account(&id).is_none() {
+        return Err("unknown account".into());
+    }
+    crate::desktop::open_account(&app, &id);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,5 +585,34 @@ mod tests {
         assert!(config.rename("a1", "").is_err());
         config.rename("a1", " Home ").unwrap();
         assert_eq!(config.name_of("a1"), "Home");
+    }
+
+    #[test]
+    fn status_query_survives_commas_colons_and_non_ascii() {
+        let a = Account {
+            id: "a2".into(),
+            name: "Work, home: é".into(),
+        };
+        let value = accounts_param(&[&a]);
+        assert!(value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'%'));
+        let mut bytes = Vec::new();
+        let raw = value.as_bytes();
+        let mut i = 0;
+        while i < raw.len() {
+            if raw[i] == b'%' {
+                bytes.push(u8::from_str_radix(&value[i + 1..i + 3], 16).unwrap());
+                i += 3;
+            } else {
+                bytes.push(raw[i]);
+                i += 1;
+            }
+        }
+        // One decode, as the URL parser does: pairs are still split on `,` and `:`.
+        assert_eq!(
+            String::from_utf8(bytes).unwrap(),
+            "a2:Work%2C%20home%3A%20%C3%A9"
+        );
     }
 }

@@ -4,7 +4,7 @@ use std::{
 };
 
 use serde::Serialize;
-use tauri::{webview::DownloadEvent, AppHandle, Emitter, Manager, Runtime, Webview};
+use tauri::{webview::DownloadEvent, AppHandle, Manager, Runtime, Webview};
 
 #[derive(Clone, Serialize, PartialEq, Debug)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -52,7 +52,7 @@ fn finished(state: &mut DownloadState, path: Option<PathBuf>, success: bool) -> 
 }
 
 fn publish<R: Runtime>(app: &AppHandle<R>, status: &DownloadStatus) {
-    let _ = app.emit_to(crate::shell::STATUS, "download-status", status);
+    crate::shell::emit_status(app, "download-status", status);
 }
 
 /// Shared download policy: allow the download to the default location and tell
@@ -87,7 +87,7 @@ pub fn reveal_last_download(
     webview: Webview,
     state: tauri::State<'_, Mutex<DownloadState>>,
 ) -> Result<(), String> {
-    if !crate::shell::local_webview(&webview, &[crate::shell::STATUS]) {
+    if !crate::shell::local_webview(&webview, &[crate::shell::LocalKind::Status]) {
         return Err("local status view required".into());
     }
     let path = state

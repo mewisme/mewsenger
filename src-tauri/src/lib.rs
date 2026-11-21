@@ -62,9 +62,8 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop::show_main(app);
         }))
-        .manage(std::sync::Mutex::new(
-            notifications::NotificationState::default(),
-        ))
+        .manage(std::sync::Mutex::new(notifications::Registry::default()))
+        .manage(accounts::ActiveAccount::default())
         .manage(std::sync::Mutex::new(downloads::DownloadState::default()))
         .invoke_handler(tauri::generate_handler![
             notifications::notification_event,
@@ -77,7 +76,14 @@ pub fn run() {
             updater::get_update_state,
             updater::check_update,
             updater::install_update,
-            diagnostics::get_diagnostics
+            diagnostics::get_diagnostics,
+            shell::set_split_layout,
+            accounts::list_accounts,
+            accounts::add_account,
+            accounts::rename_account,
+            accounts::remove_account,
+            accounts::set_layout,
+            accounts::open_account
         ])
         .on_window_event(|window, event| {
             desktop::on_window_event(window, event);
@@ -101,6 +107,7 @@ pub fn run() {
         .setup(|app| {
             appid::register(app.handle());
             app.manage(std::sync::Mutex::new(prefs::load(app.handle())));
+            app.manage(std::sync::Mutex::new(accounts::load(app.handle())));
             let updater_configured = updater::configured(app.handle());
             app.manage(std::sync::Mutex::new(updater::initial_state(
                 updater_configured,
@@ -122,16 +129,13 @@ pub fn run() {
                 eprintln!("could not initialize desktop menu/tray: {error}");
             }
             // WebView2 child creation can deadlock from Tauri's synchronous setup
-            // and event callbacks. Mount from a worker after the event loop starts.
+            // and event callbacks; the layout is mounted from a worker.
             let start_hidden = std::env::args().any(|arg| arg == "--minimized");
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                if let Err(error) = shell::mount(&handle, &window, start_hidden) {
-                    eprintln!("could not initialize Messenger views: {error}");
-                    let _ = window.set_decorations(true);
-                    let _ = window.show();
-                }
-            });
+            let show = shell::should_show_on_start(
+                start_hidden,
+                desktop::TRAY_AVAILABLE.load(std::sync::atomic::Ordering::Relaxed),
+            );
+            shell::apply_layout(app.handle(), Some(show), || {});
             Ok(())
         })
         .run(tauri::generate_context!())

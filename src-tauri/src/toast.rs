@@ -188,9 +188,26 @@ mod imp {
         }
     }
 
-    pub fn clear_all(app: &AppHandle) {
+    pub fn clear_account(app: &AppHandle, account: &str) {
+        let prefix = format!("toast-{account}-");
+        let aumid = HSTRING::from(app.config().identifier.as_str());
         let result = ToastNotificationManager::History().and_then(|history| {
-            history.ClearWithId(&HSTRING::from(app.config().identifier.as_str()))
+            for toast in history.GetHistoryWithId(&aumid)? {
+                let Ok(tag) = toast.Tag() else { continue };
+                if !tag.to_string_lossy().starts_with(&prefix) {
+                    continue;
+                }
+                let group = toast.Group().unwrap_or_default();
+                let removed = if group.is_empty() {
+                    history.Remove(&tag)
+                } else {
+                    history.RemoveGroupedTagWithId(&tag, &group, &aumid)
+                };
+                if let Err(error) = removed {
+                    eprintln!("could not remove a delivered toast: {error}");
+                }
+            }
+            Ok(())
         });
         if let Err(error) = result {
             eprintln!("could not clear delivered toasts: {error}");
@@ -213,8 +230,8 @@ pub fn remove_group(app: &AppHandle, group: &str) {
 }
 
 #[cfg(windows)]
-pub fn clear_all(app: &AppHandle) {
-    imp::clear_all(app)
+pub fn clear_account(app: &AppHandle, account: &str) {
+    imp::clear_account(app, account)
 }
 
 #[cfg(not(windows))]
@@ -230,7 +247,7 @@ pub fn show(
 pub fn remove_group(_app: &AppHandle, _group: &str) {}
 
 #[cfg(not(windows))]
-pub fn clear_all(_app: &AppHandle) {}
+pub fn clear_account(_app: &AppHandle, _account: &str) {}
 
 #[cfg(test)]
 mod tests {
