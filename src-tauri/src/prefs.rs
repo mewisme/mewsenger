@@ -4,16 +4,116 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 
+/// Colour scheme of the app. Only the scheme is set here: Messenger's own
+/// appearance setting then follows it (or not) as it does in any browser.
+#[derive(Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemePref {
+    #[default]
+    System,
+    Dark,
+    Light,
+}
+
+impl ThemePref {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "system" => Some(Self::System),
+            "dark" => Some(Self::Dark),
+            "light" => Some(Self::Light),
+            _ => None,
+        }
+    }
+
+    /// The window theme to force; none follows the system.
+    pub fn window_theme(self) -> Option<tauri::Theme> {
+        match self {
+            Self::System => None,
+            Self::Dark => Some(tauri::Theme::Dark),
+            Self::Light => Some(tauri::Theme::Light),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy)]
 #[serde(default)]
 pub struct Prefs {
+    pub theme: ThemePref,
     pub notification_preview: bool,
+    /// Do not show others that you are typing.
+    pub block_typing: bool,
+    /// Draw people's pictures as their initials.
+    pub hide_avatars: bool,
+    /// Cover names, messages and photos for screens others can see.
+    pub redact_mode: bool,
+    /// Underline misspelled words in message fields.
+    pub spell_check: bool,
+    /// Reload a Messenger page that is stuck or woke from sleep.
+    pub auto_recover: bool,
+    /// Load the newest messages of the top chats before they are opened.
+    pub read_ahead: bool,
+    /// Double-click empty space in a message to reply to it.
+    pub double_click_reply: bool,
+    /// Let unused tabs, or the whole app when minimized or in the background, give memory back.
+    pub trim_idle_memory: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
         Self {
+            theme: ThemePref::System,
             notification_preview: true,
+            block_typing: false,
+            hide_avatars: false,
+            redact_mode: false,
+            spell_check: true,
+            auto_recover: true,
+            read_ahead: false,
+            double_click_reply: false,
+            trim_idle_memory: true,
+        }
+    }
+}
+
+impl Prefs {
+    /// The choices the page script acts on, as the object it reads
+    /// (window.__MEW_PREFS); keys follow inject/26-prefs.js.
+    pub fn page_json(&self) -> String {
+        serde_json::json!({
+            "blockTyping": self.block_typing,
+            "hideAvatars": self.hide_avatars,
+            "redactMode": self.redact_mode,
+            "spellCheck": self.spell_check,
+            "autoRecover": self.auto_recover,
+            "readAhead": self.read_ahead,
+            "doubleClickReply": self.double_click_reply,
+        })
+        .to_string()
+    }
+}
+
+/// Script that gives a page the current choices, before its own scripts run
+/// and again after a load (a reload keeps the creation-time script).
+pub fn page_script(prefs: &Prefs) -> String {
+    format!(
+        "window.__MEW_PREFS = {json}; window.__mewApplyPrefs && window.__mewApplyPrefs(window.__MEW_PREFS);",
+        json = prefs.page_json()
+    )
+}
+
+/// Current choices for a script injected into a new page.
+pub fn current(app: &AppHandle) -> Prefs {
+    app.try_state::<Mutex<Prefs>>()
+        .and_then(|state| state.lock().ok().map(|p| *p))
+        .unwrap_or_default()
+}
+
+/// Gives every open Messenger page the new choices.
+fn push_to_pages(app: &AppHandle, prefs: &Prefs) {
+    let script = page_script(prefs);
+    for (label, webview) in app.webviews() {
+        if label.starts_with("messenger-") && crate::accounts::account_of(&label).is_some() {
+            let _ = webview.eval(script.as_str());
         }
     }
 }
@@ -48,6 +148,14 @@ pub struct PreviewMenuItem(pub tauri::menu::CheckMenuItem<tauri::Wry>);
 pub fn apply(mut prefs: Prefs, key: &str, value: bool) -> Result<Prefs, String> {
     match key {
         "notification_preview" => prefs.notification_preview = value,
+        "block_typing" => prefs.block_typing = value,
+        "hide_avatars" => prefs.hide_avatars = value,
+        "redact_mode" => prefs.redact_mode = value,
+        "spell_check" => prefs.spell_check = value,
+        "auto_recover" => prefs.auto_recover = value,
+        "read_ahead" => prefs.read_ahead = value,
+        "double_click_reply" => prefs.double_click_reply = value,
+        "trim_idle_memory" => prefs.trim_idle_memory = value,
         _ => return Err("unknown preference".into()),
     }
     Ok(prefs)
@@ -66,7 +174,32 @@ pub fn set(app: &AppHandle, key: &str, value: bool) -> Result<Prefs, String> {
     if let Some(item) = app.try_state::<PreviewMenuItem>() {
         let _ = item.0.set_checked(next.notification_preview);
     }
-    crate::shell::emit_status(app, "prefs-changed", next);
+    let _ = app.emit_to("settings", "prefs-changed", next);
+    push_to_pages(app, &next);
+    if key == "trim_idle_memory" {
+        crate::shell::sync_tabs(app, || {});
+    }
+    Ok(next)
+}
+
+/// Applies the saved colour scheme to every window and view.
+pub fn apply_theme(app: &AppHandle, theme: ThemePref) {
+    app.set_theme(theme.window_theme());
+}
+
+pub fn set_theme(app: &AppHandle, value: &str) -> Result<Prefs, String> {
+    let theme = ThemePref::parse(value).ok_or("unknown theme")?;
+    let state = app.state::<Mutex<Prefs>>();
+    let mut guard = state.lock().map_err(|_| "preferences unavailable")?;
+    let mut next = *guard;
+    next.theme = theme;
+    save(app, &next).map_err(|error| {
+        eprintln!("could not save preferences: {error}");
+        "could not save preferences".to_string()
+    })?;
+    *guard = next;
+    drop(guard);
+    apply_theme(app, theme);
     let _ = app.emit_to("settings", "prefs-changed", next);
     Ok(next)
 }
@@ -105,9 +238,32 @@ pub fn set_preference(
     set(&app, &key, value)
 }
 
+#[tauri::command]
+pub fn set_theme_preference(
+    app: AppHandle,
+    webview: tauri::Webview,
+    value: String,
+) -> Result<Prefs, String> {
+    if !trusted_settings_view(&webview) {
+        return Err("settings view required".into());
+    }
+    set_theme(&app, &value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn theme_is_system_unless_chosen_and_only_known_names_parse() {
+        assert_eq!(from_json("{}").theme, ThemePref::System);
+        assert_eq!(from_json("{\"theme\":\"dark\"}").theme, ThemePref::Dark);
+        assert_eq!(from_json("{\"theme\":\"sepia\"}").theme, ThemePref::System);
+        assert_eq!(ThemePref::parse("light"), Some(ThemePref::Light));
+        assert_eq!(ThemePref::parse("Light"), None);
+        assert_eq!(ThemePref::System.window_theme(), None);
+        assert_eq!(ThemePref::Dark.window_theme(), Some(tauri::Theme::Dark));
+    }
 
     #[test]
     fn missing_or_broken_files_keep_previews_on() {
@@ -127,6 +283,22 @@ mod tests {
                 .unwrap()
                 .notification_preview
         );
+    }
+
+    #[test]
+    fn page_gets_every_choice_under_the_names_the_script_reads() {
+        let prefs = Prefs {
+            block_typing: true,
+            spell_check: false,
+            ..Prefs::default()
+        };
+        let value: serde_json::Value = serde_json::from_str(&prefs.page_json()).unwrap();
+        assert_eq!(value["blockTyping"], true);
+        assert_eq!(value["spellCheck"], false);
+        assert_eq!(value["autoRecover"], true);
+        assert_eq!(value["readAhead"], false);
+        assert_eq!(value.as_object().unwrap().len(), 7);
+        assert!(page_script(&prefs).starts_with("window.__MEW_PREFS = {"));
     }
 
     #[test]

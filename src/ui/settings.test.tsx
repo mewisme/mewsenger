@@ -62,6 +62,36 @@ test("shows the stored preference and names every control", async () => {
   expect(screen.getByText(/Version 0\.1\.14/)).toBeTruthy();
 });
 
+test("a privacy switch saves its own key", async () => {
+  mock.invoke.mockImplementation((command: string) =>
+    command === "get_preferences"
+      ? Promise.resolve({ notification_preview: true, block_typing: false })
+      : Promise.resolve({ notification_preview: true, block_typing: true }));
+  const user = userEvent.setup();
+  render(<Settings version="0.1.14" />);
+  const typing = () => screen.getByRole("switch", { name: "Hide that I am typing" });
+  await waitFor(() => expect((typing() as HTMLButtonElement).disabled).toBe(false));
+  expect(typing().getAttribute("aria-checked")).toBe("false");
+  await user.click(typing());
+  expect(mock.invoke).toHaveBeenCalledWith("set_preference", { key: "block_typing", value: true });
+  await waitFor(() => expect(typing().getAttribute("aria-checked")).toBe("true"));
+});
+
+test("the theme choice saves through its own command", async () => {
+  mock.invoke.mockImplementation((command: string) =>
+    command === "get_preferences"
+      ? Promise.resolve({ notification_preview: true, theme: "system" })
+      : Promise.resolve({ notification_preview: true, theme: "dark" }));
+  const user = userEvent.setup();
+  render(<Settings version="0.1.14" />);
+  const dark = () => screen.getByRole("radio", { name: "Dark" });
+  await waitFor(() => expect((dark() as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.getByRole("radio", { name: "System" }).getAttribute("aria-checked")).toBe("true");
+  await user.click(dark());
+  expect(mock.invoke).toHaveBeenCalledWith("set_theme_preference", { value: "dark" });
+  await waitFor(() => expect(dark().getAttribute("aria-checked")).toBe("true"));
+});
+
 test("toggling saves the exact key and value", async () => {
   mock.invoke.mockImplementation((command: string) =>
     command === "get_preferences"
@@ -144,7 +174,7 @@ test("update section follows the update state and installs when one is available
 
 test("every settings control has an accessible name", async () => {
   render(<Settings version="0.1.14" />);
-  await waitFor(() => expect(screen.getAllByRole("switch").length).toBe(2));
+  await waitFor(() => expect(screen.getAllByRole("switch").length).toBe(10));
   for (const control of [...screen.getAllByRole("switch"), ...screen.getAllByRole("button")]) {
     expect((control.getAttribute("aria-label") ?? control.textContent ?? "").trim()).not.toBe("");
   }

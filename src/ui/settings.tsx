@@ -10,8 +10,24 @@ import { X } from "lucide-react";
 import { updateActionable, updateTooltip } from "@/ui/status-types";
 import { useUpdate } from "@/ui/use-update";
 
+type Theme = "system" | "dark" | "light";
+const THEMES: { value: Theme; label: string }[] = [
+  { value: "system", label: "System" },
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+];
+
 interface Preferences {
+  theme: Theme;
   notification_preview: boolean;
+  block_typing: boolean;
+  hide_avatars: boolean;
+  redact_mode: boolean;
+  spell_check: boolean;
+  auto_recover: boolean;
+  read_ahead: boolean;
+  double_click_reply: boolean;
+  trim_idle_memory: boolean;
 }
 
 function Row({ id, label, hint, checked, disabled, onChange }: {
@@ -75,6 +91,18 @@ export function Settings({ version, overlay = false }: { version: string; overla
       });
   }
 
+  function setTheme(value: Theme) {
+    const previous = prefs;
+    setError(null);
+    setPrefs((current) => (current ? { ...current, theme: value } : current));
+    invoke<Preferences>("set_theme_preference", { value })
+      .then(setPrefs)
+      .catch(() => {
+        setPrefs(previous);
+        setError("Could not save");
+      });
+  }
+
   function setLaunchAtLogin(value: boolean) {
     const previous = autostart;
     setError(null);
@@ -115,6 +143,26 @@ export function Settings({ version, overlay = false }: { version: string; overla
           </Button>
         </header>
       )}
+      <section aria-labelledby="settings-appearance">
+        <h2 id="settings-appearance" className="text-sm font-semibold">Appearance</h2>
+        <div className="flex items-center justify-between gap-4 py-2">
+          <div className="min-w-0">
+            <p id="theme-label" className="text-sm font-medium">Theme</p>
+            <p className="text-xs text-muted-foreground">Messenger follows it when its own appearance is set to the system's.</p>
+          </div>
+          <div role="radiogroup" aria-labelledby="theme-label" className="flex shrink-0 gap-1">
+            {THEMES.map(({ value, label }) => (
+              <Button key={value} type="button" role="radio" size="sm"
+                variant={(prefs?.theme ?? "system") === value ? "secondary" : "ghost"}
+                aria-checked={(prefs?.theme ?? "system") === value}
+                disabled={prefs === null}
+                onClick={() => setTheme(value)}>
+                {label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </section>
       <section aria-labelledby="settings-notifications">
         <h2 id="settings-notifications" className="text-sm font-semibold">Notifications</h2>
         <Row
@@ -132,6 +180,75 @@ export function Settings({ version, overlay = false }: { version: string; overla
             Send test notification
           </Button>
         </div>
+      </section>
+      <section aria-labelledby="settings-privacy">
+        <h2 id="settings-privacy" className="text-sm font-semibold">Privacy</h2>
+        <Row
+          id="pref-block-typing"
+          label="Hide that I am typing"
+          hint="People in a chat do not see the typing dots."
+          checked={prefs?.block_typing ?? false}
+          disabled={prefs === null}
+          onChange={(value) => setPreference("block_typing", value)}
+        />
+        <Row
+          id="pref-hide-avatars"
+          label="Show initials instead of profile pictures"
+          hint="For screens others can see."
+          checked={prefs?.hide_avatars ?? false}
+          disabled={prefs === null}
+          onChange={(value) => setPreference("hide_avatars", value)}
+        />
+        <Row
+          id="pref-redact"
+          label="Cover names, messages and photos"
+          hint="Names, previews and messages become bars; photos go dark."
+          checked={prefs?.redact_mode ?? false}
+          disabled={prefs === null}
+          onChange={(value) => setPreference("redact_mode", value)}
+        />
+      </section>
+      <section aria-labelledby="settings-chat">
+        <h2 id="settings-chat" className="text-sm font-semibold">Chat</h2>
+        <Row
+          id="pref-spell-check"
+          label="Check spelling in message fields"
+          checked={prefs?.spell_check ?? true}
+          disabled={prefs === null}
+          onChange={(value) => setPreference("spell_check", value)}
+        />
+        <Row
+          id="pref-double-click-reply"
+          label="Double-click a message to reply"
+          hint="Double-click empty space next to the text."
+          checked={prefs?.double_click_reply ?? false}
+          disabled={prefs === null}
+          onChange={(value) => setPreference("double_click_reply", value)}
+        />
+        <Row
+          id="pref-read-ahead"
+          label="Load top chats ahead of time"
+          hint="Chats at the top of the list open instantly. Uses a little more data."
+          checked={prefs?.read_ahead ?? false}
+          disabled={prefs === null}
+          onChange={(value) => setPreference("read_ahead", value)}
+        />
+        <Row
+          id="pref-auto-recover"
+          label="Reload Messenger by itself when it is stuck"
+          hint="After the computer wakes, when the connection stays down, or when chats fail to load."
+          checked={prefs?.auto_recover ?? true}
+          disabled={prefs === null}
+          onChange={(value) => setPreference("auto_recover", value)}
+        />
+        <Row
+          id="pref-trim-memory"
+          label="Use less memory when idle"
+          hint="Tabs you have not looked at for 5 minutes, or the whole app when minimized or in the background, give memory back. Notifications keep working."
+          checked={prefs?.trim_idle_memory ?? true}
+          disabled={prefs === null}
+          onChange={(value) => setPreference("trim_idle_memory", value)}
+        />
       </section>
       <AccountsSection />
       <section aria-labelledby="settings-startup">

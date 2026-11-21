@@ -11,6 +11,7 @@
     "core:window:allow-close",
     "allow-get-preferences",
     "allow-set-preference",
+    "allow-set-theme-preference",
     "allow-get-update-state",
     "allow-check-update",
     "allow-install-update",
