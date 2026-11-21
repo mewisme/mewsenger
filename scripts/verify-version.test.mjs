@@ -12,7 +12,7 @@ test("installed application metadata is consistent", () => {
 });
 
 test("Rust manifest replacement only changes the application package version", () => {
-  const source = '[package]\nname = "messenger"\nversion = "0.1.1"\n\n[dependencies]\ntauri = { version = "2.12.5" }\n';
+  const source = '[package]\nname = "mewsenger"\nversion = "0.1.1"\n\n[dependencies]\ntauri = { version = "2.12.5" }\n';
   const updated = setRustPackageVersion(source, "0.1.14");
   expect(readRustPackageVersion(updated)).toBe("0.1.14");
   expect(updated).toContain('tauri = { version = "2.12.5" }');
@@ -20,9 +20,9 @@ test("Rust manifest replacement only changes the application package version", (
 });
 
 test("Cargo lockfile parser reads only the app entry", () => {
-  const text = '[[package]]\nname = "tauri"\nversion = "2.12.5"\n\n[[package]]\nname = "messenger"\nversion = "0.1.14"\n';
+  const text = '[[package]]\nname = "tauri"\nversion = "2.12.5"\n\n[[package]]\nname = "mewsenger"\nversion = "0.1.14"\n';
   expect(readLockedPackageVersion(text)).toBe("0.1.14");
-  expect(() => readLockedPackageVersion(text + '\n[[package]]\nname = "messenger"\nversion = "1.0.0"\n')).toThrow();
+  expect(() => readLockedPackageVersion(text + '\n[[package]]\nname = "mewsenger"\nversion = "1.0.0"\n')).toThrow();
 });
 
 test("version verification rejects malformed or divergent metadata", () => {

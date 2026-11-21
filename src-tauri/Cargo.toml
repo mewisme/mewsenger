@@ -1,12 +1,12 @@
 [package]
-name = "messenger"
+name = "mewsenger"
 version = "0.1.14"
-description = "Webview for Messenger"
+description = "Desktop client for Messenger"
 authors = ["Mew"]
 edition = "2021"
 
 [lib]
-name = "messenger_lib"
+name = "mewsenger_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]

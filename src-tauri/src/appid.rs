@@ -24,7 +24,7 @@ pub fn register(app: &AppHandle) {
         .config()
         .product_name
         .clone()
-        .unwrap_or_else(|| "Messenger".into());
+        .unwrap_or_else(|| "Mewsenger".into());
 
     let wide_id = wide(&id);
     // SAFETY: wide_id is a NUL-terminated UTF-16 string that outlives the call.

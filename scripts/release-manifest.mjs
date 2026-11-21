@@ -14,7 +14,7 @@ export function buildManifest({ tag, setupName, signature, notes, now }) {
     platforms: {
       "windows-x86_64": {
         signature: signature.trim(),
-        url: `https://github.com/mewisme/messenger/releases/download/${tag}/${encodeURIComponent(setupName)}`,
+        url: `https://github.com/mewisme/mewsenger/releases/download/${tag}/${encodeURIComponent(setupName)}`,
       },
     },
   };
@@ -30,7 +30,7 @@ if (process.argv[1] && import.meta.url.endsWith(basename(process.argv[1]))) {
     tag,
     setupName: basename(setup),
     signature: readFileSync(sig, "utf8"),
-    notes: `Messenger ${tag}`,
+    notes: `Mewsenger ${tag}`,
     now: new Date(),
   });
   writeFileSync(out, JSON.stringify(manifest, null, 2) + "\n");

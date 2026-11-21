@@ -77,7 +77,7 @@ afterEach(cleanup);
 test("renders separate top window controls with accessible names", async () => {
   render(<TitleBar />);
   expect(screen.getByRole("banner", { name: "Window title bar" })).toBeTruthy();
-  expect(screen.getByText("Messenger")).toBeTruthy();
+  expect(screen.getByText("Mewsenger")).toBeTruthy();
   expect(screen.getByRole("banner", { name: "Window title bar" })
     .querySelector("img")?.getAttribute("src")).toContain("32x32");
   expect(screen.getByRole("navigation", { name: "Window controls" })).toBeTruthy();
@@ -105,7 +105,7 @@ test("minimize, restore and close call only native window actions", async () => 
 test("left mouse drag and double-click maximize work only in title area", async () => {
   const user = userEvent.setup();
   render(<TitleBar />);
-  const area = screen.getByLabelText("Drag Messenger window");
+  const area = screen.getByLabelText("Drag Mewsenger window");
   await user.pointer({ keys: "[MouseLeft>]", target: area });
   expect(runtime.drag).toHaveBeenCalledOnce();
   await user.pointer({ keys: "[/MouseLeft]", target: area });

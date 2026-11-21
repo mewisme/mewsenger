@@ -4,13 +4,13 @@ A desktop application wrapper for Facebook Messenger built with Tauri.
 
 ## Description
 
-Messenger is a native desktop application that wraps the Messenger web interface (messenger.com) in a standalone window. It provides a desktop experience for Facebook Messenger with native features like notifications and clipboard management.
+Mewsenger is a native desktop application that wraps the Messenger web interface (messenger.com) in a standalone window. It provides a desktop experience for Facebook Messenger with native features like notifications and clipboard management.
 
 ## Local desktop shell
 
 The main native window contains separate WebViews: a **custom 40px title bar at the top** with the account tabs, Settings, update and download buttons and Minimize / Maximize / Restore / Close controls, and one Messenger page (`https://www.messenger.com`) per open tab below it. The title bar loads a local React/shadcn component from its own app URL. Messenger is not embedded in an iframe or proxied through the local frontend. Only the main window is frameless; call popups and the Settings window keep native window chrome. If the title bar fails, native decorations are restored.
 
-The title bar keeps a download indicator and an update button when relevant, and a Settings button. Settings also shows the bundled Messenger icon, the installed version and credits. The custom title bar also uses the icon from `src-tauri/icons/`. The app follows the system light/dark appearance.
+The title bar keeps a download indicator and an update button when relevant, and a Settings button. Settings also shows the bundled Mewsenger icon, the installed version and credits. The custom title bar also uses the icon from `src-tauri/icons/`. The app follows the system light/dark appearance.
 
 The unread badge is updated only from recognized Messenger unread markers; missing markers remain unknown rather than being reported as zero. The update button appears only when a signed update source is built in. A download indicator appears after a file download starts and, once finished, reveals the file in Explorer. The version, credits and the test-notification button live in **Settings**.
 
@@ -57,7 +57,7 @@ Run up to four Messenger accounts at once.
 
 ## Settings, startup and updates
 
-- **Settings** opens from the tray menu (**Settings…**) or the gear in the title bar. It holds the message-preview switch (shared with the tray check item), **Launch Messenger when I sign in to Windows**, the update control and **Copy diagnostics**. Preferences are stored in `preferences.json` in the app config directory; launch at login is read from and written to the operating system, never stored by the app.
+- **Settings** opens from the tray menu (**Settings…**) or the gear in the title bar. It holds the message-preview switch (shared with the tray check item), **Launch Mewsenger when I sign in to Windows**, the update control and **Copy diagnostics**. Preferences are stored in `preferences.json` in the app config directory; launch at login is read from and written to the operating system, never stored by the app.
 - **Launch at login** is off by default. When enabled the app starts with `--minimized`: the window stays hidden and the tray icon is used (if the tray is unavailable the window is shown so the app is never invisible). A second launch does not start another copy; it shows the running window.
 - **Updates:** Settings shows *Updates are not configured* until a signed update source is built in. Release builds merge `src-tauri/tauri.release.conf.json`, which holds the public key and the `latest.json` endpoint on GitHub Releases. The portable executable cannot replace itself, so its update action opens the releases page instead. The status bar never shows a download percentage because none is available.
 - **Diagnostics** copy only versions (app, Tauri, WebView2), OS and architecture, update state, whether the session and unread count are known. No paths, URLs, messages or account data.
@@ -90,7 +90,7 @@ Run up to four Messenger accounts at once.
 
 1. Clone the repository:
 ```
-git clone https://github.com/mewisme/messenger.git
+git clone https://github.com/mewisme/mewsenger.git
 cd messenger
 ```
 
@@ -158,7 +158,7 @@ pnpm tauri build --debug --no-bundle
 pwsh -NoProfile -File ./scripts/verify-windows-shell.ps1
 ```
 
-The Windows check launches an isolated Messenger process, verifies the custom title controls and bottom status controls, resizes the window, opens About and tests both its in-app Close button and native X, then tests maximize, restore, minimize and close-to-tray. It terminates only the process it launched. For inspection without clicking the buttons, pass `-InspectOnly`. Logged-in chat, media calls, notifications and macOS behavior still require platform-specific interactive verification.
+The Windows check launches an isolated Mewsenger process, verifies the custom title controls and bottom status controls, resizes the window, opens About and tests both its in-app Close button and native X, then tests maximize, restore, minimize and close-to-tray. It terminates only the process it launched. For inspection without clicking the buttons, pass `-InspectOnly`. Logged-in chat, media calls, notifications and macOS behavior still require platform-specific interactive verification.
 
 To test unsigned Windows installers without uploading or publishing them, use `pnpm tauri build --debug`. MSI and NSIS packages are written under `src-tauri/target/debug/bundle/` and must not be treated as signed production releases.
 

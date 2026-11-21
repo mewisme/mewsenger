@@ -242,7 +242,7 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     app.on_menu_event(|app, event| dispatch(app, event.id().as_ref()));
     let icon = app.default_window_icon().cloned();
     let mut tray = TrayIconBuilder::with_id("main")
-        .tooltip("Messenger")
+        .tooltip("Mewsenger")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
@@ -264,9 +264,9 @@ pub fn set_tray_tooltip(app: &AppHandle, unread: usize) {
         return;
     };
     let text = if unread == 0 {
-        "Messenger".to_string()
+        "Mewsenger".to_string()
     } else {
-        format!("Messenger - {unread} unread")
+        format!("Mewsenger - {unread} unread")
     };
     let _ = tray.set_tooltip(Some(text));
 }

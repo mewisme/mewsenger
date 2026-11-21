@@ -255,7 +255,7 @@ export function Settings({ version, overlay = false }: { version: string; overla
         <h2 id="settings-startup" className="text-sm font-semibold">Startup</h2>
         <Row
           id="pref-autostart"
-          label="Launch Messenger when I sign in to Windows"
+          label="Launch Mewsenger when I sign in to Windows"
           hint="Starts minimized to the tray."
           checked={autostart ?? false}
           disabled={autostart === null}
@@ -293,9 +293,9 @@ export function Settings({ version, overlay = false }: { version: string; overla
       </section>
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       <section aria-labelledby="settings-about" className="mt-auto flex items-center gap-3">
-        <img src={appIcon} alt="Messenger icon" className="size-10 shrink-0" />
+        <img src={appIcon} alt="Mewsenger icon" className="size-10 shrink-0" />
         <div className="min-w-0">
-          <h2 id="settings-about" className="text-sm font-semibold">Messenger</h2>
+          <h2 id="settings-about" className="text-sm font-semibold">Mewsenger</h2>
           <p className="text-xs text-muted-foreground">Version {version} · Made by Mew</p>
           <p className="text-xs text-muted-foreground">Desktop client powered by Tauri, React and shadcn/ui.</p>
         </div>

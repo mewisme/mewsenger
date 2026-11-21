@@ -59,12 +59,12 @@ export function TitleBar({ tabs = null }: { tabs?: TabsView | null }) {
   return (
     <header aria-label="Window title bar"
       className={`flex h-10 w-full select-none items-end overflow-hidden border-b border-border text-foreground ${tabs ? "bg-muted/50" : "bg-background"}`}>
-      <div aria-label="Drag Messenger window"
+      <div aria-label="Drag Mewsenger window"
         className={`flex h-full cursor-default items-center gap-2 ${tabs ? "shrink-0 pl-3 pr-1" : "min-w-0 flex-1 px-3"}`}
         onMouseDown={drag}
         onDoubleClick={toggleMaximize}>
         <img src={appIcon} alt="" aria-hidden="true" className="size-4 shrink-0" />
-        {!tabs && <span className="truncate text-xs font-semibold">Messenger</span>}
+        {!tabs && <span className="truncate text-xs font-semibold">Mewsenger</span>}
       </div>
       {tabs && (
         <>

@@ -78,7 +78,7 @@ jobs:
 
       - name: Collect portable executable
         shell: bash
-        run: cp src-tauri/target/release/messenger.exe Messenger-windows-portable.exe
+        run: cp src-tauri/target/release/mewsenger.exe Mewsenger-windows-portable.exe
 
       - name: Upload to a draft release
         shell: bash
@@ -90,4 +90,4 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi \
             src-tauri/target/release/bundle/msi/*.msi.sig \
             latest.json \
-            Messenger-windows-portable.exe
+            Mewsenger-windows-portable.exe

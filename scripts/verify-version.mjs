@@ -21,7 +21,7 @@ export function setRustPackageVersion(manifest, version) {
 }
 
 export function readLockedPackageVersion(lockfile) {
-  const found = [...lockfile.matchAll(/^\[\[package\]\]\s*\r?\nname\s*=\s*"messenger"\s*\r?\nversion\s*=\s*"([^"]+)"/gm)];
+  const found = [...lockfile.matchAll(/^\[\[package\]\]\s*\r?\nname\s*=\s*"mewsenger"\s*\r?\nversion\s*=\s*"([^"]+)"/gm)];
   if (found.length !== 1) throw new Error("Cargo lockfile app entry is missing or duplicated");
   return found[0][1];
 }

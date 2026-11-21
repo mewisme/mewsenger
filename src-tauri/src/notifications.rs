@@ -27,7 +27,7 @@ fn notification_text(preview: bool, title: String, body: String) -> (String, Str
     if preview {
         (title, body)
     } else {
-        ("Messenger".into(), "New message".into())
+        ("Mewsenger".into(), "New message".into())
     }
 }
 
@@ -230,7 +230,7 @@ fn in_background(app: &AppHandle, account: &str) -> bool {
 
 fn notice(app: &AppHandle, body: &str) {
     if let Err(error) = with_sound(app.notification().builder())
-        .title("Messenger")
+        .title("Mewsenger")
         .body(body)
         .show()
     {
@@ -347,7 +347,7 @@ pub fn test_notification(app: AppHandle, webview: Webview) -> Result<(), String>
         crate::accounts::FIRST,
         0,
         "test".into(),
-        "Messenger notification test".into(),
+        "Mewsenger notification test".into(),
         "Desktop notification request sent from Messenger.".into(),
         false,
     )
@@ -712,7 +712,7 @@ mod tests {
         );
         assert_eq!(
             notification_text(false, "Alice".into(), "hi".into()),
-            ("Messenger".to_string(), "New message".to_string())
+            ("Mewsenger".to_string(), "New message".to_string())
         );
     }
     fn pend(registry: &mut Registry, id: i32, account: &str, thread: &str, created: Instant) {

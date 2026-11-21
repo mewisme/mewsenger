@@ -58,7 +58,7 @@ test("shows the stored preference and names every control", async () => {
       : Promise.reject(new Error("x")));
   render(<Settings version="0.1.14" />);
   await waitFor(() => expect(preview().getAttribute("aria-checked")).toBe("false"));
-  expect(screen.getByRole("switch", { name: "Launch Messenger when I sign in to Windows" })).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "Launch Mewsenger when I sign in to Windows" })).toBeTruthy();
   expect(screen.getByText(/Version 0\.1\.14/)).toBeTruthy();
 });
 
@@ -132,7 +132,7 @@ test("a failed save reverts the switch and says so", async () => {
 test("autostart is read from the system and toggled through the plugin", async () => {
   const user = userEvent.setup();
   render(<Settings version="0.1.14" />);
-  const toggle = screen.getByRole("switch", { name: "Launch Messenger when I sign in to Windows" });
+  const toggle = screen.getByRole("switch", { name: "Launch Mewsenger when I sign in to Windows" });
   await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
   await user.click(toggle);
   expect(mock.enable).toHaveBeenCalledOnce();

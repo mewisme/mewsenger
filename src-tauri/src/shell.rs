@@ -630,7 +630,7 @@ fn open_settings_window(app: &AppHandle) {
             WebviewUrl::App("index.html?view=settings".into()),
         )
         .on_navigation(local_asset_url)
-        .title("Messenger settings")
+        .title("Mewsenger settings")
         .inner_size(480.0, 620.0)
         .min_inner_size(420.0, 360.0)
         .resizable(true)

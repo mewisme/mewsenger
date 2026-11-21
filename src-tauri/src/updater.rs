@@ -4,7 +4,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, Webview};
 use tauri_plugin_updater::UpdaterExt;
 
-const RELEASES_URL: &str = "https://github.com/mewisme/messenger/releases/latest";
+const RELEASES_URL: &str = "https://github.com/mewisme/mewsenger/releases/latest";
 const CHECK_FAILED: &str = "Could not check for updates";
 const INSTALL_FAILED: &str = "Could not install the update";
 

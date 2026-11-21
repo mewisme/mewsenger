@@ -2269,7 +2269,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "messenger"
+name = "mewsenger"
 version = "0.1.14"
 dependencies = [
  "serde",

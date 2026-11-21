@@ -11,7 +11,7 @@ if (-not $IsWindows) {
 
 if (-not $Executable) {
     $repository = Split-Path -Parent $PSScriptRoot
-    $Executable = Join-Path $repository "src-tauri/target/debug/messenger.exe"
+    $Executable = Join-Path $repository "src-tauri/target/debug/mewsenger.exe"
 }
 
 $Executable = (Resolve-Path -LiteralPath $Executable -ErrorAction Stop).Path
@@ -62,7 +62,7 @@ function Invoke-Control([System.Windows.Automation.AutomationElement]$Root, [str
 
 function Find-About([int]$ProcessId) {
     $condition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::NameProperty, "Messenger settings"
+        [System.Windows.Automation.AutomationElement]::NameProperty, "Mewsenger settings"
     )
     $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
         [System.Windows.Automation.TreeScope]::Children, $condition
@@ -92,7 +92,7 @@ try {
         Start-Sleep -Milliseconds 400
     }
     if (-not $window -or $window.MainWindowHandle -eq 0) {
-        throw "Messenger did not create a native window."
+        throw "Mewsenger did not create a native window."
     }
 
     # WebView2 children are attached after the initial native frame appears.
@@ -161,7 +161,7 @@ try {
         }
         Write-Output "Native maximize, restore, minimize and close verified."
     }
-    Write-Output "PASS: Messenger shell is functional."
+    Write-Output "PASS: Mewsenger shell is functional."
 } finally {
     # Only terminate the process launched by this check.
     if ($owned) { Stop-Process -Id $owned.Id -Force -ErrorAction SilentlyContinue }
