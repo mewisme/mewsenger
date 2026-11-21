@@ -10,7 +10,7 @@ use tauri_plugin_notification::NotificationExt;
 
 const MAIN: &str = "main";
 const REMOTE: &str = "messenger";
-static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
+pub static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
 fn activates_main_on_toast(action: &str) -> bool {
     action == "tap"
@@ -46,7 +46,7 @@ fn open_notification_thread(app: &AppHandle, notification_id: i32) {
     let _ = webview.eval(format!("window.location.assign({target});"));
 }
 
-fn show_main(app: &AppHandle) {
+pub(crate) fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_window(MAIN) {
         let _ = window.show();
         let _ = window.unminimize();
@@ -98,15 +98,16 @@ fn dispatch(app: &AppHandle, id: &str) {
             }
         }
         "notification-preview" => {
-            if let Some(state) = app.try_state::<std::sync::Mutex<crate::prefs::Prefs>>() {
-                if let Ok(mut guard) = state.lock() {
-                    guard.notification_preview = !guard.notification_preview;
-                    if let Err(error) = crate::prefs::save(app, &guard) {
+            // The check item already toggled itself on click.
+            if let Some(item) = app.try_state::<crate::prefs::PreviewMenuItem>() {
+                if let Ok(checked) = item.0.is_checked() {
+                    if let Err(error) = crate::prefs::set(app, "notification_preview", checked) {
                         eprintln!("could not save preferences: {error}");
                     }
                 }
             }
         }
+        "settings" => crate::shell::open_settings(app),
         _ => {}
     }
 }
@@ -138,6 +139,7 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     )
     .checked(preview)
     .build(app)?;
+    app.manage(crate::prefs::PreviewMenuItem(preview_item.clone()));
     let menu = MenuBuilder::new(app)
         .text("show", "Show Messenger")
         .text("search", "Search chats")
@@ -153,6 +155,7 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
         .text("forward", "Forward")
         .text("reload", "Reload Messenger")
         .text("account", "Account menu")
+        .text("settings", "Settings…")
         .text("logout", "Sign out")
         .separator()
         .item(&preview_item)
@@ -163,7 +166,7 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     // Keep the web interface unchanged: commands live in the native tray menu.
     app.on_menu_event(|app, event| dispatch(app, event.id().as_ref()));
     let icon = app.default_window_icon().cloned();
-    let mut tray = TrayIconBuilder::new()
+    let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Messenger")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -178,6 +181,18 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     tray.build(app)?;
     TRAY_AVAILABLE.store(true, Ordering::Relaxed);
     Ok(())
+}
+
+pub fn set_tray_tooltip(app: &AppHandle, unread: usize) {
+    let Some(tray) = app.tray_by_id("main") else {
+        return;
+    };
+    let text = if unread == 0 {
+        "Messenger".to_string()
+    } else {
+        format!("Messenger - {unread} unread")
+    };
+    let _ = tray.set_tooltip(Some(text));
 }
 
 pub fn on_window_event(window: &Window, event: &WindowEvent) {

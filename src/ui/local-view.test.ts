@@ -5,6 +5,7 @@ test("routes local assets by their explicit URL rather than potentially shared r
   expect(resolveLocalView("?view=status", "titlebar")).toBe("status");
   expect(resolveLocalView("?view=titlebar", "status")).toBe("titlebar");
   expect(resolveLocalView("?view=credits", "status")).toBe("credits");
+  expect(resolveLocalView("?view=settings", "status")).toBe("settings");
 });
 
 test("keeps browser previews and older local URLs usable", () => {

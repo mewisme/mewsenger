@@ -8,6 +8,7 @@ import { StatusBar } from "@/ui/status-bar";
 import { TitleBar } from "@/ui/title-bar";
 import { resolveLocalView } from "@/ui/local-view";
 import { Credits } from "@/ui/credits";
+import { Settings } from "@/ui/settings";
 
 export function DesktopApp() {
   const [version, setVersion] = useState("Version unavailable");
@@ -19,6 +20,7 @@ export function DesktopApp() {
   );
   const creditsView = localView === "credits";
   const titlebarView = localView === "titlebar";
+  const settingsView = localView === "settings";
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const [connection, setConnection] = useState<"offline" | "unknown">(
     () => typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "unknown",
@@ -34,7 +36,7 @@ export function DesktopApp() {
   }, [titlebarView]);
 
   useEffect(() => {
-    if (!isTauri() || creditsView || titlebarView) return;
+    if (!isTauri() || creditsView || titlebarView || settingsView) return;
     let active = true;
     let eventReceived = false;
     let detach: (() => void) | undefined;
@@ -62,10 +64,10 @@ export function DesktopApp() {
       active = false;
       detach?.();
     };
-  }, [creditsView, titlebarView]);
+  }, [creditsView, titlebarView, settingsView]);
 
   useEffect(() => {
-    if (titlebarView || creditsView) return;
+    if (titlebarView || creditsView || settingsView) return;
     const offline = () => setConnection("offline");
     // A working network connection does not prove a Messenger session is connected.
     const online = () => setConnection("unknown");
@@ -75,9 +77,11 @@ export function DesktopApp() {
       window.removeEventListener("offline", offline);
       window.removeEventListener("online", online);
     };
-  }, [titlebarView, creditsView]);
+  }, [titlebarView, creditsView, settingsView]);
 
   if (titlebarView) return <TitleBar />;
+
+  if (settingsView) return <Settings version={version} />;
 
   if (creditsView) {
     return <Credits version={version} />;
@@ -89,6 +93,10 @@ export function DesktopApp() {
       return;
     }
     setCreditsOpen(true);
+  }
+
+  function showSettings() {
+    void invoke("show_settings").catch(() => { /* The tray menu offers the same window. */ });
   }
 
   function testDesktopNotification() {
@@ -107,6 +115,7 @@ export function DesktopApp() {
         connection={connection}
         unreadCount={unreadCount}
         onCredits={showCredits}
+        onSettings={isTauri() ? showSettings : undefined}
         onTestNotification={isTauri() ? testDesktopNotification : undefined}
         notificationTestStatus={notificationTestStatus}
       />

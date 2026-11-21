@@ -5,6 +5,9 @@ fn main() {
             "current_status",
             "test_notification",
             "show_credits",
+            "show_settings",
+            "get_preferences",
+            "set_preference",
         ]),
     ))
     .expect("could not prepare Tauri application");

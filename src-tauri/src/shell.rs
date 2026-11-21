@@ -76,7 +76,11 @@ pub fn resize(window: &Window) -> tauri::Result<()> {
     Ok(())
 }
 
-pub fn mount(app: &AppHandle, window: &Window) -> tauri::Result<()> {
+pub fn should_show_on_start(start_hidden: bool, tray_available: bool) -> bool {
+    !start_hidden || !tray_available
+}
+
+pub fn mount(app: &AppHandle, window: &Window, start_hidden: bool) -> tauri::Result<()> {
     let (width, height) = bounds(window)?;
     let url = crate::site::current().start_url().clone();
     let navigation_app = app.clone();
@@ -117,13 +121,23 @@ pub fn mount(app: &AppHandle, window: &Window) -> tauri::Result<()> {
         eprintln!("could not initialize local status: {error}");
         // The remote WebView remains usable if the optional footer fails.
         resize(window)?;
-        window.show()?;
+        if should_show_on_start(
+            start_hidden,
+            crate::desktop::TRAY_AVAILABLE.load(Ordering::Relaxed),
+        ) {
+            window.show()?;
+        }
         return Ok(());
     }
     resize(window)?;
     #[cfg(debug_assertions)]
     eprintln!("Messenger webviews mounted: {}", window.webviews().len());
-    window.show()?;
+    if should_show_on_start(
+        start_hidden,
+        crate::desktop::TRAY_AVAILABLE.load(Ordering::Relaxed),
+    ) {
+        window.show()?;
+    }
     Ok(())
 }
 
@@ -176,9 +190,79 @@ pub fn show_credits(app: AppHandle, webview: tauri::Webview) -> Result<(), Strin
     Ok(())
 }
 
+static SETTINGS_OPENING: AtomicBool = AtomicBool::new(false);
+
+struct SettingsOpening;
+
+impl Drop for SettingsOpening {
+    fn drop(&mut self) {
+        SETTINGS_OPENING.store(false, Ordering::Release);
+    }
+}
+
+#[tauri::command]
+pub fn show_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    let url = webview.url().map_err(|_| "local URL unavailable")?;
+    if webview.label() != STATUS || webview.window().label() != "main" || !local_asset_url(&url) {
+        return Err("local status view required".into());
+    }
+    open_settings(&app);
+    Ok(())
+}
+
+pub fn open_settings(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return;
+    }
+    // Same rule as the credits window: build off the native event thread.
+    if SETTINGS_OPENING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let _opening = SettingsOpening;
+        if let Some(window) = app.get_webview_window("settings") {
+            let _ = window.show();
+            let _ = window.set_focus();
+            return;
+        }
+        match tauri::WebviewWindowBuilder::new(
+            &app,
+            "settings",
+            WebviewUrl::App("index.html?view=settings".into()),
+        )
+        .on_navigation(local_asset_url)
+        .title("Messenger settings")
+        .inner_size(480.0, 420.0)
+        .min_inner_size(420.0, 360.0)
+        .resizable(true)
+        .visible(false)
+        .center()
+        .build()
+        {
+            Ok(window) => {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            Err(error) => eprintln!("could not open settings: {error}"),
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hidden_start_needs_a_tray_to_stay_reachable() {
+        assert!(should_show_on_start(false, false));
+        assert!(should_show_on_start(false, true));
+        assert!(should_show_on_start(true, false));
+        assert!(!should_show_on_start(true, true));
+    }
 
     #[test]
     fn distinct_child_labels_and_bounded_footer() {

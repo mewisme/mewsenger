@@ -1,4 +1,4 @@
-import { Bell, CircleDot, Info, RefreshCcw } from "lucide-react";
+import { Bell, CircleDot, Info, RefreshCcw, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -11,6 +11,7 @@ export interface StatusBarProps {
   connection: ConnectionState;
   unreadCount: number | null;
   onCredits: () => void;
+  onSettings?: () => void;
   onTestNotification?: () => void;
   notificationTestStatus?: string | null;
 }
@@ -22,7 +23,7 @@ const labels: Record<ConnectionState, string> = {
 };
 
 export function StatusBar({
-  version, connection, unreadCount, onCredits, onTestNotification, notificationTestStatus,
+  version, connection, unreadCount, onCredits, onSettings, onTestNotification, notificationTestStatus,
 }: StatusBarProps) {
   return (
     <TooltipProvider>
@@ -63,6 +64,16 @@ export function StatusBar({
           </Tooltip>
           <Separator orientation="vertical" className="h-3" />
           <span aria-label="Application version" className="tabular-nums">{version}</span>
+          {onSettings && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-xs" type="button" onClick={onSettings} aria-label="Settings">
+                  <Settings aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Settings</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon-xs" type="button" onClick={onCredits} aria-label="Credits">

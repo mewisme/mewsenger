@@ -54,6 +54,9 @@ fn open_popup<R: Runtime>(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            desktop::show_main(app);
+        }))
         .manage(std::sync::Mutex::new(
             notifications::NotificationState::default(),
         ))
@@ -61,7 +64,10 @@ pub fn run() {
             notifications::notification_event,
             notifications::current_status,
             notifications::test_notification,
-            shell::show_credits
+            shell::show_credits,
+            shell::show_settings,
+            prefs::get_preferences,
+            prefs::set_preference
         ])
         .on_window_event(|window, event| {
             desktop::on_window_event(window, event);
@@ -78,6 +84,10 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .setup(|app| {
             appid::register(app.handle());
             app.manage(std::sync::Mutex::new(prefs::load(app.handle())));
@@ -95,9 +105,10 @@ pub fn run() {
             }
             // WebView2 child creation can deadlock from Tauri's synchronous setup
             // and event callbacks. Mount from a worker after the event loop starts.
+            let start_hidden = std::env::args().any(|arg| arg == "--minimized");
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                if let Err(error) = shell::mount(&handle, &window) {
+                if let Err(error) = shell::mount(&handle, &window, start_hidden) {
                     eprintln!("could not initialize Messenger views: {error}");
                     let _ = window.set_decorations(true);
                     let _ = window.show();

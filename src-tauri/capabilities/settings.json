@@ -1,0 +1,16 @@
+{
+  "identifier": "settings",
+  "description": "Local settings window",
+  "webviews": ["settings"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:app:allow-version",
+    "core:window:allow-close",
+    "allow-get-preferences",
+    "allow-set-preference",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
+}
