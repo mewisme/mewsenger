@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'vitest';
+import { parts, part } from './inject-source.mjs';
 
-const dir = new URL('../capabilities/', import.meta.url);
+const dir = new URL('../../capabilities/', import.meta.url);
 const capabilities = fs.readdirSync(dir)
   .filter((name) => name.endsWith('.json'))
   .map((name) => JSON.parse(fs.readFileSync(new URL(name, dir), 'utf8')));
@@ -38,45 +39,46 @@ test('local views receive exactly the commands they use', () => {
   assert.deepEqual(byId('settings').permissions, [
     'core:event:allow-listen', 'core:event:allow-unlisten', 'core:app:allow-version',
     'core:window:allow-close', 'allow-get-preferences', 'allow-set-preference',
+    'allow-set-theme-preference',
     'allow-get-update-state', 'allow-check-update', 'allow-install-update',
     'allow-get-diagnostics', 'allow-test-notification', 'allow-list-accounts',
     'allow-add-account', 'allow-rename-account', 'allow-remove-account',
     'allow-open-account', 'allow-set-settings-placement', 'allow-close-settings',
     'autostart:allow-enable', 'autostart:allow-disable', 'autostart:allow-is-enabled',
   ]);
-  assert.deepEqual(byId('default').permissions, [
-    'core:default', 'allow-show-settings', 'allow-reveal-last-download',
-    'allow-get-update-state', 'allow-check-update', 'allow-install-update',
-  ]);
+  assert.equal(byId('default'), undefined);
+  assert.equal(byId('desktop-capability'), undefined);
+  for (const permission of [
+    'allow-show-settings', 'allow-reveal-last-download', 'allow-get-update-state',
+    'allow-check-update', 'allow-install-update',
+  ]) {
+    assert.ok(byId('titlebar').permissions.includes(permission), permission);
+  }
   assert.deepEqual(byId('tabmenu').webviews, ['tabmenu']);
   assert.deepEqual(byId('tabmenu').permissions, [
-    'allow-open-account', 'allow-add-account', 'allow-close-tab-menu',
+    'allow-open-account', 'allow-list-accounts', 'allow-add-account', 'allow-close-tab-menu',
   ]);
   for (const permission of ['allow-open-account', 'allow-add-account', 'allow-close-tab', 'allow-open-tab-menu']) {
     assert.ok(byId('titlebar').permissions.includes(permission), permission);
   }
 });
 
-test('settings commands are not offered to the status or title bar views', () => {
-  for (const id of ['default', 'titlebar']) {
-    const permissions = byId(id).permissions;
-    assert.ok(!permissions.includes('allow-set-preference'), id);
-    assert.ok(!permissions.includes('allow-get-preferences'), id);
-    assert.ok(!permissions.some((permission) => permission.startsWith('autostart:')), id);
-  }
+test('settings commands are not offered to the title bar view', () => {
+  const permissions = byId('titlebar').permissions;
+  assert.ok(!permissions.includes('allow-set-preference'));
+  assert.ok(!permissions.includes('allow-get-preferences'));
+  assert.ok(!permissions.some((permission) => permission.startsWith('autostart:')));
 });
 
 test('local views are granted by label pattern, one capability per kind', () => {
-  assert.deepEqual(byId('default').webviews, ['status-*']);
-  assert.deepEqual(byId('desktop-capability').webviews, ['status-*']);
   assert.deepEqual(byId('titlebar').webviews, ['titlebar-*']);
   assert.deepEqual(byId('tabmenu').webviews, ['tabmenu']);
 });
 
 test('account and tab commands reach only the views that use them', () => {
-  const settingsOnly = ['allow-list-accounts', 'allow-rename-account', 'allow-remove-account',
+  const settingsOnly = ['allow-rename-account', 'allow-remove-account',
     'allow-set-settings-placement', 'allow-close-settings'];
-  const tabViews = ['allow-open-account', 'allow-add-account'];
+  const tabViews = ['allow-open-account', 'allow-add-account', 'allow-list-accounts'];
   const allowed = {
     settings: [...settingsOnly, ...tabViews],
     titlebar: [...tabViews, 'allow-close-tab', 'allow-open-tab-menu', 'allow-move-tab', 'allow-tab-shortcut'],
@@ -89,9 +91,19 @@ test('account and tab commands reach only the views that use them', () => {
   }
 });
 
-test('injected page scripts never wrap network primitives', () => {
-  for (const name of ['10-links.js', '20-desktop.js', '30-notifications.js']) {
-    const source = fs.readFileSync(new URL(`inject/${name}`, import.meta.url), 'utf8');
-    assert.ok(!/WebSocket|XMLHttpRequest|\bfetch\s*=|\.fetch\b/.test(source), `${name} touches network primitives`);
+// The few parts that may touch the network primitives, and why: the typing
+// filter edits Messenger's own requests on their way out, recovery watches its
+// connections and probes whether Messenger answers, downloads fetch a photo
+// the browser would not save, and the account part fetches the user's own
+// picture to shrink it for the tab.
+const MAY_USE_SOCKETS = new Set(['80-privacy-typing.js', '90-recover.js']);
+const MAY_FETCH = new Set(['56-account-name.js', '90-recover.js', '94-downloads.js']);
+
+test('injected page scripts touch network primitives only where listed', () => {
+  for (const name of parts) {
+    const source = part(name);
+    assert.ok(!/XMLHttpRequest|sendBeacon/.test(source), `${name} uses XMLHttpRequest or sendBeacon`);
+    assert.ok(MAY_USE_SOCKETS.has(name) || !/WebSocket/.test(source), `${name} touches WebSocket`);
+    assert.ok(MAY_FETCH.has(name) || !/\bfetch\b/.test(source.replace(/\/\/.*$/gm, '')), `${name} uses fetch`);
   }
 });

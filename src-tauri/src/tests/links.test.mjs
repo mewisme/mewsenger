@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { Listeners } from './listeners.mjs';
 import { test } from 'vitest';
 import vm from 'node:vm';
 import { site, facebookSite } from './site-fixture.mjs';
 
-const script = readFileSync(new URL('./inject/10-links.js', import.meta.url), 'utf8');
+import { script } from './inject-source.mjs';
 
 function click(href, {
   button = 0, download = false, ctrlKey = false, metaKey = false,
   shiftKey = false, altKey = false, pageUrl = 'https://www.messenger.com/t/123',
   siteProfile = site,
 } = {}) {
-  const handlers = new Map();
+  const handlers = new Listeners();
   const opened = [];
   class Element {
     closest() {

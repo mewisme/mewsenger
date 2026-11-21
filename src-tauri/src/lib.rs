@@ -19,13 +19,9 @@ use tauri::{
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
-/// Page scripts, run in file-name order after the site prelude. Numbers leave
-/// room to slot new parts between existing ones.
-pub(crate) const INJECT_SCRIPTS: [&str; 3] = [
-    include_str!("inject/10-links.js"),
-    include_str!("inject/20-desktop.js"),
-    include_str!("inject/30-notifications.js"),
-];
+/// The page script: every part of src/inject, joined in file-name order by
+/// build.rs. The numbers leave room to slot a new part between two others.
+pub(crate) const INJECT_SCRIPT: &str = include_str!(concat!(env!("OUT_DIR"), "/inject.js"));
 
 fn open_popup<R: Runtime>(
     app: &AppHandle<R>,
@@ -44,10 +40,8 @@ fn open_popup<R: Runtime>(
     let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
         .title("Messenger")
         .window_features(features)
-        .initialization_script(site::current().prelude());
-    let builder = INJECT_SCRIPTS
-        .iter()
-        .fold(builder, |builder, script| builder.initialization_script(*script))
+        .initialization_script(site::current().prelude())
+        .initialization_script(INJECT_SCRIPT)
         .on_navigation(move |url| links::allow_navigation(&navigation_app, url))
         .on_new_window(move |url, features| open_popup(&popup_app, url, features))
         .on_download(downloads::handler(app.clone()));
@@ -74,6 +68,7 @@ pub fn run() {
             shell::show_settings,
             prefs::get_preferences,
             prefs::set_preference,
+            prefs::set_theme_preference,
             downloads::reveal_last_download,
             updater::get_update_state,
             updater::check_update,
@@ -113,7 +108,9 @@ pub fn run() {
         ))
         .setup(|app| {
             appid::register(app.handle());
-            app.manage(std::sync::Mutex::new(prefs::load(app.handle())));
+            let saved = prefs::load(app.handle());
+            prefs::apply_theme(app.handle(), saved.theme);
+            app.manage(std::sync::Mutex::new(saved));
             app.manage(std::sync::Mutex::new(accounts::load(app.handle())));
             let updater_configured = updater::configured(app.handle());
             app.manage(std::sync::Mutex::new(updater::initial_state(

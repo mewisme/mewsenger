@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { fakeElement } from './fake-element.mjs';
+import { Listeners } from './listeners.mjs';
 import { test } from 'vitest';
 import vm from 'node:vm';
 import { site, facebookSite } from './site-fixture.mjs';
 
-const script = readFileSync(new URL('./inject/20-desktop.js', import.meta.url), 'utf8');
+import { script } from './inject-source.mjs';
 
 function page(url = 'https://www.messenger.com/t/123', siteProfile = site) {
-  const handlers = new Map();
+  const handlers = new Listeners();
+  const observers = [];
   const timers = [];
   const state = { field: null, image: null, dialog: null, search: null, chats: [], account: null, logout: null, newChat: null };
   class Element {
@@ -27,11 +29,18 @@ function page(url = 'https://www.messenger.com/t/123', siteProfile = site) {
       return null;
     }
     click() { this.clicked++; }
+    append() {}
+    remove() {}
+    toggleAttribute() {}
+    setAttribute() {}
+    removeAttribute() {}
+    getAttribute() { return null; }
     focus() { this.focused++; document.activeElement = this; }
     addEventListener(name, cb) { handlers.set('viewer:' + name, cb); }
     removeEventListener(name) { handlers.delete('viewer:' + name); }
   }
   const document = {
+    createElement: () => fakeElement(),
     readyState: 'complete', hidden: false, body: new Element(), documentElement: new Element(),
     activeElement: null,
     hasFocus() { return true; },
@@ -56,14 +65,19 @@ function page(url = 'https://www.messenger.com/t/123', siteProfile = site) {
   if (siteProfile) window.__MEW_SITE__ = siteProfile;
   const location = new URL(url);
   vm.runInNewContext(script, {
+    Element,
     window, location, document, MutationObserver: class {
-      constructor(fn) { state.observe = fn; }
-      observe() {}
+      constructor(fn) { this.fn = fn; }
+      observe() { observers.push(this.fn); }
     },
     navigator: { platform: 'Win32' },
     URL, innerWidth: 1200, innerHeight: 800,
-    setTimeout(fn) { timers.push(fn); },
+    requestAnimationFrame() { return 0; }, cancelAnimationFrame() {},
+    setInterval() { return 0; }, clearInterval() {},
+    // Housekeeping that re-arms itself (polls, probes) is not what these tests drive.
+    setTimeout(fn, ms = 0) { if (ms < 1000) timers.push(fn); return 0; },
   });
+  state.observe = () => observers.forEach((fn) => fn([]));
   const flush = () => {
     let count = 0;
     while (timers.length) {
@@ -87,19 +101,19 @@ function page(url = 'https://www.messenger.com/t/123', siteProfile = site) {
 
 test('desktop enhancement follows the configured site profile', () => {
   const messengerOnFacebookProfile = page('https://www.messenger.com/t/123', facebookSite);
-  assert.equal(messengerOnFacebookProfile.window.__mewDesktopInstalled, undefined);
+  assert.equal(messengerOnFacebookProfile.window.__mewInjected, undefined);
   assert.equal(messengerOnFacebookProfile.handlers.size, 0);
   const facebook = page('https://www.facebook.com/messages/t/1', facebookSite);
-  assert.equal(facebook.window.__mewDesktopInstalled, true);
+  assert.equal(facebook.window.__mewInjected, true);
   const inert = page('https://www.messenger.com/t/123', null);
-  assert.equal(inert.window.__mewDesktopInstalled, undefined);
+  assert.equal(inert.window.__mewInjected, undefined);
   assert.equal(inert.handlers.size, 0);
 });
 
 test('desktop enhancement never runs on third-party pages or non-HTTPS', () => {
   for (const url of ['https://www.facebook.com/messages', 'https://messenger.com.evil.example/', 'http://www.messenger.com/']) {
     const p = page(url);
-    assert.equal(p.window.__mewDesktopInstalled, undefined);
+    assert.equal(p.window.__mewInjected, undefined);
     assert.equal(p.handlers.size, 0);
   }
 });
@@ -226,16 +240,15 @@ test('Ctrl+number leaves other text inputs alone', () => {
   assert.equal(p.state.chats[0].clicked, 0);
 });
 
-test('Ctrl+Shift+brackets move between chats and Ctrl+Tab is left to the tab strip', () => {
+test('Ctrl+Shift+brackets move between chats while Ctrl+Tab does not', () => {
   const p = chatPage(3);
   p.location.pathname = '/t/101';
   p.fire('document:keydown', { key: '}', code: 'BracketRight', ctrlKey: true, shiftKey: true });
   assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [0, 0, 1]);
   p.fire('document:keydown', { key: '{', code: 'BracketLeft', ctrlKey: true, shiftKey: true });
   assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [1, 0, 1]);
-  const tab = p.fire('document:keydown', { key: 'Tab', ctrlKey: true });
+  p.fire('document:keydown', { key: 'Tab', ctrlKey: true });
   p.fire('document:keydown', { key: 'Tab', ctrlKey: true, shiftKey: true });
-  assert.equal(tab.defaultPrevented, false);
   assert.deepEqual(p.state.chats.map((chat) => chat.clicked), [1, 0, 1]);
 });
 

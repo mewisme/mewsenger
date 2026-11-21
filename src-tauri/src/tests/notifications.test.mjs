@@ -4,7 +4,9 @@ import { test } from 'vitest';
 import vm from 'node:vm';
 import { site, facebookSite } from './site-fixture.mjs';
 
-const script = fs.readFileSync(new URL('./inject/30-notifications.js', import.meta.url), 'utf8');
+import { fakeElement } from './fake-element.mjs';
+import { Listeners } from './listeners.mjs';
+import { script } from './inject-source.mjs';
 
 function createPage({
   url = 'https://www.messenger.com/t/1',
@@ -15,7 +17,7 @@ function createPage({
   threadBase = 'https://www.messenger.com/t/',
 } = {}) {
   const events = [];
-  const handlers = new Map();
+  const handlers = new Listeners();
   const timers = [];
   const rows = [];
   let focused = true;
@@ -63,11 +65,15 @@ function createPage({
   };
   vm.runInNewContext(script, {
     window, document, location, Notification: NativeNotification, URL,
+    navigator: { platform: 'Win32' },
     MutationObserver: class {
       constructor(cb) { handlers.set('mutation', cb); }
       observe() {}
     },
-    setTimeout(cb) { timers.push(cb); },
+    requestAnimationFrame() { return 0; }, cancelAnimationFrame() {},
+    setInterval() { return 0; }, clearInterval() {},
+    // Housekeeping that re-arms itself (polls, probes) is not what these tests drive.
+    setTimeout(cb, ms = 0) { if (ms < 1000) timers.push(cb); return 0; },
     Math, Promise, Reflect,
     getComputedStyle: (el) => ({ fontWeight: String(el.weight ?? 400) }),
     KeyboardEvent: class {
@@ -109,7 +115,7 @@ function createPage({
       this.flush();
     },
     refresh() {
-      handlers.get('mutation')();
+      handlers.get('mutation')([]);
       this.flush();
     },
     setComposer(element) { composerEl = element; },
@@ -126,7 +132,7 @@ test('origin restricts native messaging and refuses nested iframes', () => {
   for (const url of ['https://evil.example/t/1', 'http://www.messenger.com/t/1',
     'https://www.messenger.com.evil.example/t/1']) {
     const p = createPage({ url });
-    assert.equal(p.window.__mewNotificationsInstalled, undefined);
+    assert.equal(p.window.__mewInjected, undefined);
     assert.equal(p.handlers.size, 0);
   }
 });
@@ -200,63 +206,22 @@ test('denied notification permission is not bypassed by desktop fallback', () =>
   assert.equal(p.events.some((e) => e.event.kind === 'notify'), false);
 });
 
-test('blurred Messenger emits a generic native notification for newly unread conversations', () => {
+test('a change in the unread list never creates a native toast, blurred or not', () => {
   const p = createPage();
   p.addThread('old', 'Unread message');
   p.addThread('new', 'Seen');
   p.flush();
-  assert.equal(p.events.some(({ event }) => event.kind === 'new_unread'), false);
   p.blur();
   p.clear();
   p.addThread('old', 'Unread message');
   p.addThread('new', 'Unread message');
   p.refresh();
-  const arrivals = p.events.filter(({ event }) => event.kind === 'new_unread');
-  assert.equal(arrivals.length, 1);
-  assert.equal(arrivals[0].event.thread_id, 'new');
-  assert.deepEqual(Object.keys(arrivals[0].event), ['kind', 'thread_id']);
-  p.refresh();
-  assert.equal(p.events.filter(({ event }) => event.kind === 'new_unread').length, 1);
-});
-
-test('hidden Messenger can report unread arrivals while in tray', () => {
-  const p = createPage();
-  p.addThread('a', 'Seen');
-  p.flush();
   p.document.hidden = true;
   p.handlers.get('document:visibilitychange')();
   p.flush();
-  p.clear();
-  p.addThread('a', 'Unread message');
-  p.refresh();
-  assert.equal(p.events.filter(({ event }) => event.kind === 'new_unread').length, 1);
-});
-
-test('foreground and first loaded unread list never create native arrival toasts', () => {
-  const p = createPage();
-  p.addThread('a', 'Unread message');
-  p.flush();
-  p.clear();
-  p.addThread('a', 'Unread message');
-  p.addThread('b', 'Unread message');
-  p.refresh();
-  assert.equal(p.events.some(({ event }) => event.kind === 'new_unread'), false);
-  const hidden = createPage();
-  hidden.document.hidden = true;
-  hidden.addThread('old', 'Unread message');
-  hidden.flush();
-  assert.equal(hidden.events.some(({ event }) => event.kind === 'new_unread'), false);
-});
-
-test('explicit browser notification denial suppresses generic unread fallback', () => {
-  const p = createPage({ notificationPermission: 'denied' });
-  p.addThread('a', 'Seen');
-  p.flush();
-  p.blur();
-  p.clear();
-  p.addThread('a', 'Unread message');
-  p.refresh();
-  assert.equal(p.events.some(({ event }) => event.kind === 'new_unread'), false);
+  assert.equal(p.events.some(({ event }) => event.kind === 'new_unread' || event.kind === 'notify'), false);
+  assert.deepEqual(
+    [...p.events.filter(({ event }) => event.kind === 'unread').at(-1).event.threads].sort(), ['new', 'old']);
 });
 
 test('focused chat alone does not falsely mark a notification as read', () => {
@@ -310,7 +275,7 @@ test('no desktop command exposure means app keeps the Messenger page functioning
 
 test('only the scoped Messenger command is granted to remote content', () => {
   const settings = JSON.parse(fs.readFileSync(
-    new URL('../capabilities/messenger-notifications.json', import.meta.url), 'utf8'));
+    new URL('../../capabilities/messenger-notifications.json', import.meta.url), 'utf8'));
   assert.equal(settings.local, false);
   assert.deepEqual(settings.webviews, ['messenger-*']);
   assert.equal(settings.windows, undefined);
@@ -319,22 +284,10 @@ test('only the scoped Messenger command is granted to remote content', () => {
     [...settings.remote.urls].sort(),
     site.app_hosts.map((host) => `https://${host}/*`).sort(),
   );
-  const local = JSON.parse(fs.readFileSync(
-    new URL('../capabilities/default.json', import.meta.url), 'utf8'));
-  assert.deepEqual(local.webviews, ['status-*']);
-  assert.equal(local.windows, undefined);
-  assert.deepEqual(local.permissions, [
-    'core:default', 'allow-show-settings', 'allow-reveal-last-download',
-    'allow-get-update-state', 'allow-check-update', 'allow-install-update',
-  ]);
-  const desktop = JSON.parse(fs.readFileSync(
-    new URL('../capabilities/desktop.json', import.meta.url), 'utf8'));
   const config = JSON.parse(fs.readFileSync(
-    new URL('../tauri.conf.json', import.meta.url), 'utf8'));
-  assert.deepEqual(desktop.webviews, ['status-*']);
-  assert.deepEqual(desktop.permissions, []);
+    new URL('../../tauri.conf.json', import.meta.url), 'utf8'));
   const titlebar = JSON.parse(fs.readFileSync(
-    new URL('../capabilities/titlebar.json', import.meta.url), 'utf8'));
+    new URL('../../capabilities/titlebar.json', import.meta.url), 'utf8'));
   assert.deepEqual(titlebar.webviews, ['titlebar-*']);
   assert.equal(titlebar.windows, undefined);
   assert.equal(titlebar.remote, undefined);
@@ -349,21 +302,21 @@ test('script follows the configured site profile', () => {
   const messengerOnFacebookProfile = createPage({
     url: 'https://www.messenger.com/t/1', siteProfile: facebookSite,
   });
-  assert.equal(messengerOnFacebookProfile.window.__mewNotificationsInstalled, undefined);
+  assert.equal(messengerOnFacebookProfile.window.__mewInjected, undefined);
   assert.equal(messengerOnFacebookProfile.handlers.size, 0);
 
   const p = createPage({
     url: 'https://www.facebook.com/messages/t/1', siteProfile: facebookSite,
     threadBase: 'https://www.facebook.com/messages/t/',
   });
-  assert.equal(p.window.__mewNotificationsInstalled, true);
+  assert.equal(p.window.__mewInjected, true);
   p.addThread('1', 'Unread message');
   p.refresh();
   assert.deepEqual(
     [...p.events.filter(({ event }) => event.kind === 'unread').at(-1).event.threads], ['1']);
 
   const inert = createPage({ siteProfile: null });
-  assert.equal(inert.window.__mewNotificationsInstalled, undefined);
+  assert.equal(inert.window.__mewInjected, undefined);
   assert.equal(inert.handlers.size, 0);
 });
 
@@ -385,20 +338,6 @@ test('the login page reports signed out', () => {
   assert.deepEqual(
     p.events.filter((e) => e.event.kind === 'session').map((e) => e.event.state),
     ['signed_out'],
-  );
-});
-
-test('a reloaded page re-baselines instead of announcing old unread conversations', () => {
-  const p = createPage();
-  p.blur();
-  p.addThread('a', 'Unread message');
-  p.refresh();
-  assert.equal(p.events.some((e) => e.event.kind === 'new_unread'), false);
-  p.addThread('b', 'Unread message');
-  p.refresh();
-  assert.deepEqual(
-    p.events.filter((e) => e.event.kind === 'new_unread').map((e) => e.event.thread_id),
-    ['b'],
   );
 });
 

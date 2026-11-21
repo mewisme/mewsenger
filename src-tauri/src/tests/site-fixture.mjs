@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 // The bundled profile shipped with the app.
-export const site = JSON.parse(readFileSync(new URL('../site.json', import.meta.url), 'utf8'));
+export const site = JSON.parse(readFileSync(new URL('../../site.json', import.meta.url), 'utf8'));
 
 // An alternative profile used to prove scripts follow the config, not constants.
 export const facebookSite = {
