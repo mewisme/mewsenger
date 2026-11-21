@@ -1,4 +1,4 @@
-import { CircleDot, Info, RefreshCcw } from "lucide-react";
+import { Bell, CircleDot, Info, RefreshCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -11,6 +11,8 @@ export interface StatusBarProps {
   connection: ConnectionState;
   unreadCount: number | null;
   onCredits: () => void;
+  onTestNotification?: () => void;
+  notificationTestStatus?: string | null;
 }
 
 const labels: Record<ConnectionState, string> = {
@@ -19,7 +21,9 @@ const labels: Record<ConnectionState, string> = {
   unknown: "Status unavailable",
 };
 
-export function StatusBar({ version, connection, unreadCount, onCredits }: StatusBarProps) {
+export function StatusBar({
+  version, connection, unreadCount, onCredits, onTestNotification, notificationTestStatus,
+}: StatusBarProps) {
   return (
     <TooltipProvider>
       <footer
@@ -34,6 +38,21 @@ export function StatusBar({ version, connection, unreadCount, onCredits }: Statu
           <output aria-label="Unread conversations">
             <Badge variant="secondary">{unreadCount === null ? "–" : Math.max(0, unreadCount)}</Badge>
           </output>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" type="button"
+                disabled={!onTestNotification} onClick={onTestNotification}
+                aria-label="Test desktop notifications">
+                <Bell aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {notificationTestStatus ?? "Send a test notification to the operating system"}
+            </TooltipContent>
+          </Tooltip>
+          <span role="status" aria-live="polite" className="sr-only">
+            {notificationTestStatus}
+          </span>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon-xs" type="button" disabled aria-label="Updates unavailable">

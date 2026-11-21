@@ -66,6 +66,25 @@ test("reads installed app version using the trusted Tauri API", async () => {
   expect(screen.getByLabelText("Unread conversations").textContent).toBe("–");
 });
 
+test("test notification action sends a scoped native request with factual feedback", async () => {
+  const user = userEvent.setup();
+  render(<DesktopApp />);
+  await user.click(screen.getByRole("button", { name: "Test desktop notifications" }));
+  expect(runtime.invoke).toHaveBeenCalledWith("test_notification");
+  expect(await screen.findByText("Request sent; check Windows notifications")).toBeTruthy();
+});
+
+test("test notification errors are shown without claiming delivery", async () => {
+  runtime.invoke.mockImplementation((name) =>
+    name === "test_notification" ? Promise.reject(new Error("not permitted")) :
+      Promise.resolve(name === "current_status" ? { unread_count: null } : undefined),
+  );
+  const user = userEvent.setup();
+  render(<DesktopApp />);
+  await user.click(screen.getByRole("button", { name: "Test desktop notifications" }));
+  expect(await screen.findByText("Notification request failed")).toBeTruthy();
+});
+
 test("does not invent version data outside the Tauri runtime", () => {
   runtime.available = false;
   render(<DesktopApp />);

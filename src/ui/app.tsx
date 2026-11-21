@@ -12,6 +12,7 @@ import { Credits } from "@/ui/credits";
 export function DesktopApp() {
   const [version, setVersion] = useState("Version unavailable");
   const [creditsOpen, setCreditsOpen] = useState(false);
+  const [notificationTestStatus, setNotificationTestStatus] = useState<string | null>(null);
   const localView = resolveLocalView(
     typeof window !== "undefined" ? window.location.search : "",
     isTauri() ? getCurrentWebview().label : null,
@@ -90,6 +91,14 @@ export function DesktopApp() {
     setCreditsOpen(true);
   }
 
+  function testDesktopNotification() {
+    if (!isTauri()) return;
+    setNotificationTestStatus("Sending notification request…");
+    void invoke("test_notification")
+      .then(() => setNotificationTestStatus("Request sent; check Windows notifications"))
+      .catch(() => setNotificationTestStatus("Notification request failed"));
+  }
+
   return (
     <main className="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-background">
       <div className="min-h-0 flex-1" aria-hidden="true" />
@@ -98,6 +107,8 @@ export function DesktopApp() {
         connection={connection}
         unreadCount={unreadCount}
         onCredits={showCredits}
+        onTestNotification={isTauri() ? testDesktopNotification : undefined}
+        notificationTestStatus={notificationTestStatus}
       />
       <Dialog open={creditsOpen} onOpenChange={setCreditsOpen}>
         <DialogContent>
