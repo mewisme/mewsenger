@@ -1,3 +1,4 @@
+mod accounts;
 mod appid;
 mod desktop;
 mod diagnostics;
