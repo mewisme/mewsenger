@@ -178,14 +178,13 @@ fn reply_target(registry: &Registry, id: i32, now: Instant) -> Option<(String, S
         .then(|| (toast.account.clone(), toast.thread.clone()))
 }
 
-/// True when nobody is looking at the account's page: its window is hidden or
-/// unfocused, or the single-window layout is showing another account.
+/// True when nobody is looking at the account's page: its tab is not the one
+/// on screen, or the main window is hidden or unfocused.
 fn in_background(app: &AppHandle, account: &str) -> bool {
-    let config = crate::accounts::snapshot(app);
-    if config.is_switch() && config.shown_account() != account {
+    if crate::accounts::snapshot(app).shown_account() != account {
         return true;
     }
-    crate::accounts::host_window(app, account).is_none_or(|window| {
+    app.get_window("main").is_none_or(|window| {
         !window.is_visible().unwrap_or(true) || !window.is_focused().unwrap_or(true)
     })
 }
@@ -342,7 +341,6 @@ pub enum MessageEvent {
         ok: bool,
         reason: Option<String>,
     },
-    Focus,
     Reset,
 }
 
@@ -498,10 +496,8 @@ pub fn notification_event(
     let account = crate::accounts::account_of(webview.label())
         .ok_or("origin not permitted")?
         .to_string();
-    let window_label = webview.window().label().to_string();
-    if !trusted(&current, webview.label())
-        || (window_label != "main" && window_label != crate::accounts::window_label(&account))
-    {
+    let in_main = webview.window().label() == "main";
+    if !trusted(&current, webview.label()) || !in_main {
         return Err("origin not permitted".into());
     }
     let now = Instant::now();
@@ -652,13 +648,6 @@ pub fn notification_event(
             let signed_in = parse_session(&state)?;
             registry.state(&account).session = Some(signed_in);
         }
-        MessageEvent::Focus => {
-            if let Some(active) = app.try_state::<crate::accounts::ActiveAccount>() {
-                if let Ok(mut active) = active.0.lock() {
-                    *active = account.clone();
-                }
-            }
-        }
     }
     let total = registry.total_unread();
     drop(registry);
@@ -676,8 +665,9 @@ fn remove_thread_toasts(app: &AppHandle, account: &str, thread: &str) {
     }
 }
 
-/// Drops everything held for a removed account and refreshes the totals.
-pub fn account_removed(app: &AppHandle, account: &str) {
+/// Drops everything held for an account whose tab closed or that was removed,
+/// and refreshes the totals.
+pub fn account_closed(app: &AppHandle, account: &str) {
     toast::clear_account(app, account);
     let Some(registry) = app.try_state::<Mutex<Registry>>() else {
         return;

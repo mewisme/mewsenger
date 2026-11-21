@@ -37,10 +37,10 @@ Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, n
 
 ## Multiple accounts
 
-Settings > Accounts runs up to four Messenger accounts at once.
+Run up to four Messenger accounts at once.
 
-- **Layouts:** *Separate windows* gives each account its own window (the main window is the first account; the others start hidden, open them from Settings or the tray **Accounts** menu, and they line up side by side when the screen is wide enough). *Single window* shows one account at a time in the main window; switch from the tabs in the title bar, from Settings or from the tray, and the other accounts keep running off screen so their notifications still arrive. *Split panes* shows two accounts side by side in the main window; drag the divider, each pane keeps at least 480 px and the window never gets narrower than 966 px. At that width Messenger switches to its narrow layout: click a conversation to open it, use the left arrow to return to the list. Split supports up to two accounts. The layout and, in single window, the account used last are restored on the next start.
-- **Settings:** open in their own window or over the main window's page (Settings > Open settings; applies the next time they open).
+- **Tabs:** accounts are browser-style tabs in the title bar, named after the account. Click a tab to switch, the x to close it (the account, its login and its data stay), and + to open a closed account or sign in to a new one. The last tab cannot be closed. Open tabs keep running, so notifications still arrive for accounts that are not on screen; a closed tab stops running. Open tabs and the tab you used last are restored on the next start.
+- **Settings:** open in their own window or over the main window's page (Settings > Open settings; applies the next time they open). Removing an account in Settings is the only way to delete its data.
 - **Data:** the first account keeps the existing login. Others store their profile in `accounts/<id>` under the app's local data folder; removing an account deletes it.
 - **Notifications:** toasts, unread counts and the tray tooltip are tracked per account; the badge and tooltip show the total.
 - **Costs:** every account keeps its own WebView2 process, so memory use grows with the account count. Messenger may ask for extra verification when several accounts are active (unverified).

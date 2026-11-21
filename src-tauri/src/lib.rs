@@ -63,7 +63,6 @@ pub fn run() {
             desktop::show_main(app);
         }))
         .manage(std::sync::Mutex::new(notifications::Registry::default()))
-        .manage(accounts::ActiveAccount::default())
         .manage(std::sync::Mutex::new(downloads::DownloadState::default()))
         .invoke_handler(tauri::generate_handler![
             notifications::notification_event,
@@ -76,14 +75,14 @@ pub fn run() {
             updater::check_update,
             updater::install_update,
             diagnostics::get_diagnostics,
-            shell::set_split_layout,
             accounts::list_accounts,
             accounts::add_account,
             accounts::rename_account,
             accounts::remove_account,
-            accounts::set_layout,
             accounts::open_account,
-            accounts::switch_account,
+            accounts::close_tab,
+            accounts::open_tab_menu,
+            accounts::close_tab_menu,
             accounts::set_settings_placement,
             accounts::close_settings
         ])
@@ -109,11 +108,7 @@ pub fn run() {
         .setup(|app| {
             appid::register(app.handle());
             app.manage(std::sync::Mutex::new(prefs::load(app.handle())));
-            let accounts_config = accounts::load(app.handle());
-            if let Ok(mut active) = app.state::<accounts::ActiveAccount>().0.lock() {
-                *active = accounts_config.shown_account().to_string();
-            }
-            app.manage(std::sync::Mutex::new(accounts_config));
+            app.manage(std::sync::Mutex::new(accounts::load(app.handle())));
             let updater_configured = updater::configured(app.handle());
             app.manage(std::sync::Mutex::new(updater::initial_state(
                 updater_configured,
@@ -141,7 +136,7 @@ pub fn run() {
                 start_hidden,
                 desktop::TRAY_AVAILABLE.load(std::sync::atomic::Ordering::Relaxed),
             );
-            shell::apply_layout(app.handle(), Some(show), || {});
+            shell::apply_layout(app.handle(), show);
             Ok(())
         })
         .run(tauri::generate_context!())

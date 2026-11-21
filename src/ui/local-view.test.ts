@@ -1,17 +1,17 @@
 import { expect, test } from "vitest";
-import { parseAccounts, parseOverlay, parseSplit, parseTabs, resolveLocalView } from "./local-view";
+import { parseAccounts, parseOverlay, parseTabMenu, parseTabs, resolveLocalView } from "./local-view";
 
 test("routes local assets by their explicit URL rather than potentially shared runtime metadata", () => {
   expect(resolveLocalView("?view=status", "titlebar-a1")).toBe("status");
   expect(resolveLocalView("?view=titlebar", "status-a1")).toBe("titlebar");
   expect(resolveLocalView("?view=settings", "status-a1")).toBe("settings");
-  expect(resolveLocalView("?view=split", "status-a1")).toBe("split");
+  expect(resolveLocalView("?view=tabmenu", "status-a1")).toBe("tabmenu");
 });
 
 test("keeps browser previews and older local URLs usable", () => {
   expect(resolveLocalView("?preview=titlebar", null)).toBe("titlebar");
   expect(resolveLocalView("", "settings")).toBe("settings");
-  expect(resolveLocalView("", "split")).toBe("split");
+  expect(resolveLocalView("", "tabmenu")).toBe("tabmenu");
   expect(resolveLocalView("", "titlebar-a2")).toBe("titlebar");
   expect(resolveLocalView("", "status-a1")).toBe("status");
   expect(resolveLocalView("?view=unknown", null)).toBe("status");
@@ -34,22 +34,30 @@ test("account lists survive names with separators and drop malformed entries", (
   expect(parseAccounts("?accounts=nonsense")).toEqual([{ id: "a1", name: "Account 1" }]);
 });
 
-test("the split view takes account ids and a bounded ratio", () => {
-  expect(parseSplit("?view=split&ratio=0.4&accounts=a1,a2")).toEqual({ ids: ["a1", "a2"], ratio: 0.4 });
-  expect(parseSplit("?view=split").ratio).toBe(0.5);
-  expect(parseSplit("?ratio=0.99&accounts=a1,a2").ratio).toBe(0.8);
-  expect(parseSplit("?ratio=0.01&accounts=a1,a2").ratio).toBe(0.2);
-  expect(parseSplit("?ratio=abc").ratio).toBe(0.5);
-});
-
-test("tabs need two listed accounts and fall back to the first when the active one is unknown", () => {
-  expect(parseTabs("?view=titlebar")).toBeNull();
-  expect(parseTabs("?accounts=a1%3AHome")).toBeNull();
-  expect(parseTabs("?accounts=a1%3AHome%2Ca2%3AWork&active=a2")).toEqual({
-    accounts: [{ id: "a1", name: "Home" }, { id: "a2", name: "Work" }],
+test("tabs list every account, keep known open ids in order and fall back to the first open one", () => {
+  expect(parseTabs("?view=titlebar")).toEqual({
+    accounts: [{ id: "a1", name: "Account 1" }],
+    open: ["a1"],
+    active: "a1",
+  });
+  expect(parseTabs("?accounts=a1%3AHome%2Ca2%3AWork%2Ca3%3ASpare&open=a2,a1&active=a2")).toEqual({
+    accounts: [{ id: "a1", name: "Home" }, { id: "a2", name: "Work" }, { id: "a3", name: "Spare" }],
+    open: ["a2", "a1"],
     active: "a2",
   });
-  expect(parseTabs("?accounts=a1%3AHome%2Ca2%3AWork&active=a9")?.active).toBe("a1");
+  expect(parseTabs("?accounts=a1,a2&open=a9,a2,a2&active=a1")).toMatchObject({ open: ["a2"], active: "a2" });
+  expect(parseTabs("?accounts=a1,a2&open=a2&active=a9").active).toBe("a2");
+  expect(parseTabs("?accounts=a1:Home,a2:Work")).toMatchObject({ open: ["a1"], active: "a1" });
+});
+
+test("the tab menu may list no accounts and defaults the next number", () => {
+  expect(parseTabMenu("?view=tabmenu")).toEqual({ accounts: [], next: 2 });
+  expect(parseTabMenu("?view=tabmenu&accounts=&next=5")).toEqual({ accounts: [], next: 5 });
+  expect(parseTabMenu("?accounts=nonsense&next=x").accounts).toEqual([]);
+  expect(parseTabMenu("?accounts=a2%3AWork%2Ca3%3AHome&next=4")).toEqual({
+    accounts: [{ id: "a2", name: "Work" }, { id: "a3", name: "Home" }],
+    next: 4,
+  });
 });
 
 test("the overlay flag is explicit", () => {

@@ -1,16 +1,16 @@
-export type LocalView = "titlebar" | "status" | "settings" | "split";
+export type LocalView = "titlebar" | "status" | "settings" | "tabmenu";
 
 export function resolveLocalView(search: string, fallbackLabel: string | null): LocalView {
   const params = new URLSearchParams(search);
   const selected = params.get("view");
   if (
     selected === "titlebar" || selected === "status" ||
-    selected === "settings" || selected === "split"
+    selected === "settings" || selected === "tabmenu"
   ) {
     return selected;
   }
   if (params.get("preview") === "titlebar") return "titlebar";
-  if (fallbackLabel === "settings" || fallbackLabel === "split") return fallbackLabel;
+  if (fallbackLabel === "settings" || fallbackLabel === "tabmenu") return fallbackLabel;
   if (fallbackLabel?.startsWith("titlebar")) return "titlebar";
   return "status";
 }
@@ -47,33 +47,45 @@ export function parseAccounts(search: string): AccountRef[] {
   return accounts.length > 0 ? accounts : [{ id: "a1", name: "Account 1" }];
 }
 
-/** Account ids and divider position for the split view (`?accounts=a1,a2&ratio=0.5`). */
-export function parseSplit(search: string): { ids: string[]; ratio: number } {
-  const params = new URLSearchParams(search);
-  const ids = parseAccounts(`?accounts=${params.get("accounts") ?? ""}`).map((a) => a.id);
-  const ratio = Number(params.get("ratio"));
-  return {
-    ids,
-    ratio: Number.isFinite(ratio) && ratio > 0 ? Math.min(0.8, Math.max(0.2, ratio)) : 0.5,
-  };
-}
-
 export interface TabsView {
+  /** Every account, open or not. */
   accounts: AccountRef[];
+  /** Ids with a tab, in tab order. */
+  open: string[];
   active: string;
 }
 
 /**
- * Account tabs of the single-window title bar (`?accounts=…&active=a2`); null
- * unless at least two accounts are listed.
+ * Tabs of the title bar (`?accounts=…&open=a1,a2&active=a2`). Unknown ids in
+ * `open` are dropped; with none left the first account is the only tab.
  */
-export function parseTabs(search: string): TabsView | null {
+export function parseTabs(search: string): TabsView {
   const params = new URLSearchParams(search);
-  if (!params.get("accounts")) return null;
   const accounts = parseAccounts(search);
-  if (accounts.length < 2) return null;
+  const open: string[] = [];
+  for (const id of (params.get("open") ?? "").split(",")) {
+    if (accounts.some((a) => a.id === id) && !open.includes(id)) open.push(id);
+  }
+  if (open.length === 0) open.push(accounts[0].id);
   const active = params.get("active") ?? "";
-  return { accounts, active: accounts.some((a) => a.id === active) ? active : accounts[0].id };
+  return { accounts, open, active: open.includes(active) ? active : open[0] };
+}
+
+export interface TabMenuView {
+  /** Accounts without a tab; may be empty. */
+  accounts: AccountRef[];
+  /** Number the next new account is named after. */
+  next: number;
+}
+
+/** Content of the new-tab dropdown (`?accounts=…&next=3`). */
+export function parseTabMenu(search: string): TabMenuView {
+  const params = new URLSearchParams(search);
+  const raw = params.get("accounts") ?? "";
+  const accounts = raw === "" ? [] : parseAccounts(search).filter((account) =>
+    raw.split(",").some((entry) => entry.split(":")[0] === account.id));
+  const next = Number(params.get("next"));
+  return { accounts, next: Number.isInteger(next) && next > 0 ? next : 2 };
 }
 
 /** True when settings are drawn over the main window (`?overlay=1`). */

@@ -41,18 +41,20 @@ test('local views receive exactly the commands they use', () => {
     'allow-get-update-state', 'allow-check-update', 'allow-install-update',
     'allow-get-diagnostics', 'allow-test-notification', 'allow-list-accounts',
     'allow-add-account', 'allow-rename-account', 'allow-remove-account',
-    'allow-set-layout', 'allow-open-account', 'allow-switch-account',
-    'allow-set-settings-placement', 'allow-close-settings', 'autostart:allow-enable',
-    'autostart:allow-disable', 'autostart:allow-is-enabled',
+    'allow-open-account', 'allow-set-settings-placement', 'allow-close-settings',
+    'autostart:allow-enable', 'autostart:allow-disable', 'autostart:allow-is-enabled',
   ]);
   assert.deepEqual(byId('default').permissions, [
     'core:default', 'allow-show-settings', 'allow-reveal-last-download',
     'allow-get-update-state', 'allow-check-update', 'allow-install-update',
   ]);
-  assert.deepEqual(byId('split').webviews, ['split']);
-  assert.deepEqual(byId('split').permissions, [
-    'allow-set-split-layout', 'core:event:allow-listen', 'core:event:allow-unlisten',
+  assert.deepEqual(byId('tabmenu').webviews, ['tabmenu']);
+  assert.deepEqual(byId('tabmenu').permissions, [
+    'allow-open-account', 'allow-add-account', 'allow-close-tab-menu',
   ]);
+  for (const permission of ['allow-open-account', 'allow-add-account', 'allow-close-tab', 'allow-open-tab-menu']) {
+    assert.ok(byId('titlebar').permissions.includes(permission), permission);
+  }
 });
 
 test('settings commands are not offered to the status or title bar views', () => {
@@ -68,25 +70,22 @@ test('local views are granted by label pattern, one capability per kind', () => 
   assert.deepEqual(byId('default').webviews, ['status-*']);
   assert.deepEqual(byId('desktop-capability').webviews, ['status-*']);
   assert.deepEqual(byId('titlebar').webviews, ['titlebar-*']);
+  assert.deepEqual(byId('tabmenu').webviews, ['tabmenu']);
 });
 
-test('account management and split layout commands reach only their own view', () => {
-  const account = ['allow-list-accounts', 'allow-add-account', 'allow-rename-account',
-    'allow-remove-account', 'allow-set-layout', 'allow-open-account',
+test('account and tab commands reach only the views that use them', () => {
+  const settingsOnly = ['allow-list-accounts', 'allow-rename-account', 'allow-remove-account',
     'allow-set-settings-placement', 'allow-close-settings'];
+  const tabViews = ['allow-open-account', 'allow-add-account'];
+  const allowed = {
+    settings: [...settingsOnly, ...tabViews],
+    titlebar: [...tabViews, 'allow-close-tab', 'allow-open-tab-menu'],
+    tabmenu: [...tabViews, 'allow-close-tab-menu'],
+  };
+  const tracked = [...new Set(Object.values(allowed).flat())];
   for (const capability of capabilities) {
-    const has = account.filter((permission) => capability.permissions.includes(permission));
-    assert.deepEqual(has, capability.identifier === 'settings' ? account : [], capability.identifier);
-    assert.equal(
-      capability.permissions.includes('allow-set-split-layout'),
-      capability.identifier === 'split',
-      capability.identifier,
-    );
-    assert.equal(
-      capability.permissions.includes('allow-switch-account'),
-      capability.identifier === 'settings' || capability.identifier === 'titlebar',
-      capability.identifier,
-    );
+    const has = tracked.filter((permission) => capability.permissions.includes(permission));
+    assert.deepEqual(has.sort(), [...(allowed[capability.identifier] ?? [])].sort(), capability.identifier);
   }
 });
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AppWindow, Columns2, PanelTop, Plus, Repeat, Trash2 } from "lucide-react";
+import { AppWindow, PanelTop, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,20 +14,17 @@ export interface AccountInfo {
   name: string;
 }
 
-export type LayoutMode = "windows" | "switch" | "split";
 export type SettingsPlacement = "window" | "overlay";
 
 export interface AccountsConfig {
-  layout: LayoutMode;
   settings: SettingsPlacement;
   active: string;
-  split_ratio: number;
+  open: string[];
   next_id: number;
   accounts: AccountInfo[];
 }
 
 export const MAX_ACCOUNTS = 4;
-export const MAX_SPLIT_ACCOUNTS = 2;
 const FIRST_ACCOUNT = "a1";
 
 function isConfig(value: unknown): value is AccountsConfig {
@@ -109,9 +106,7 @@ export function AccountsSection() {
   }
 
   const count = config.accounts.length;
-  const splitAllowed = count <= MAX_SPLIT_ACCOUNTS;
   const draftOf = (account: AccountInfo) => drafts[account.id] ?? account.name;
-  const shown = config.layout === "switch" && count > 1 ? config.active : null;
 
   function commitRename(account: AccountInfo) {
     const name = draftOf(account).trim();
@@ -145,16 +140,18 @@ export function AccountsSection() {
                 onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                 className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 text-sm hover:border-input focus:border-input focus:outline-none"
               />
-              {shown === account.id && <Badge variant="secondary">Showing</Badge>}
+              {account.id === config.active
+                ? <Badge variant="secondary">Showing</Badge>
+                : config.open.includes(account.id) && <Badge variant="outline">Open</Badge>}
               <Button type="button" variant="secondary" size="sm"
                 aria-label={`Open ${account.name}`}
-                disabled={shown === account.id}
+                disabled={account.id === config.active}
                 onClick={() => {
                   setMessage(null);
                   invoke("open_account", { id: account.id })
                     .catch(() => setMessage("Could not open account"));
                 }}>
-                {config.layout === "switch" ? "Switch" : "Open"}
+                {config.open.includes(account.id) ? "Switch" : "Open tab"}
               </Button>
               <Button type="button" variant="ghost" size="icon-sm"
                 aria-label={`Remove ${account.name}`}
@@ -177,27 +174,8 @@ export function AccountsSection() {
         <p className="text-xs text-muted-foreground">
           {count >= MAX_ACCOUNTS ? `Up to ${MAX_ACCOUNTS} accounts.` : "Each account keeps its own login."}
         </p>
-      </section>
-
-      <section aria-labelledby="settings-layout" className="flex flex-col gap-2">
-        <h2 id="settings-layout" className="text-sm font-semibold">Layout</h2>
-        <div role="radiogroup" aria-labelledby="settings-layout" className="flex gap-2">
-          <Choice icon={<AppWindow className="size-4" />} label="Separate windows"
-            hint="One window per account"
-            checked={config.layout === "windows"}
-            onSelect={() => run("set_layout", { layout: "windows" }, "Could not change layout")} />
-          <Choice icon={<Repeat className="size-4" />} label="Single window"
-            hint="Switch accounts from the title bar"
-            checked={config.layout === "switch"}
-            onSelect={() => run("set_layout", { layout: "switch" }, "Could not change layout")} />
-          <Choice icon={<Columns2 className="size-4" />} label="Split panes"
-            hint={splitAllowed ? "Two accounts side by side" : "Split supports up to 2 accounts"}
-            checked={config.layout === "split"}
-            disabled={!splitAllowed}
-            onSelect={() => run("set_layout", { layout: "split" }, "Could not change layout")} />
-        </div>
         <p className="text-xs text-muted-foreground">
-          Your layout and the account you used last are restored when Messenger starts.
+          Open tabs and the account you used last are restored when Messenger starts.
         </p>
       </section>
 

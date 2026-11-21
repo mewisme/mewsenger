@@ -5,10 +5,10 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { StatusBar } from "@/ui/status-bar";
 import { TitleBar } from "@/ui/title-bar";
-import { parseOverlay, parseSplit, parseTabs, resolveLocalView } from "@/ui/local-view";
+import { parseOverlay, parseTabMenu, parseTabs, resolveLocalView } from "@/ui/local-view";
 import { Settings } from "@/ui/settings";
-import { SplitView } from "@/ui/split";
 import type { DownloadStatus } from "@/ui/status-types";
+import { TabMenu } from "@/ui/tab-menu";
 import { useUpdate } from "@/ui/use-update";
 
 export function DesktopApp() {
@@ -20,7 +20,7 @@ export function DesktopApp() {
   );
   const titlebarView = localView === "titlebar";
   const settingsView = localView === "settings";
-  const splitView = localView === "split";
+  const tabMenuView = localView === "tabmenu";
   const statusView = localView === "status";
   const [download, setDownload] = useState<DownloadStatus | null>(null);
   const { update, act } = useUpdate(statusView);
@@ -52,12 +52,9 @@ export function DesktopApp() {
 
   if (titlebarView) return <TitleBar tabs={parseTabs(search)} />;
 
-  if (settingsView) return <Settings version={version} overlay={parseOverlay(search)} />;
+  if (tabMenuView) return <TabMenu view={parseTabMenu(search)} />;
 
-  if (splitView) {
-    const { ids, ratio } = parseSplit(search);
-    return <SplitView ids={ids} ratio={ratio} />;
-  }
+  if (settingsView) return <Settings version={version} overlay={parseOverlay(search)} />;
 
   function showSettings() {
     void invoke("show_settings").catch(() => { /* The tray menu offers the same window. */ });

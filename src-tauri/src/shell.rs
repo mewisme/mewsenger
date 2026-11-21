@@ -4,24 +4,26 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{
     webview::WebviewBuilder, AppHandle, Emitter, EventTarget, LogicalPosition, LogicalSize,
-    Manager, Url, WebviewUrl, Window, WindowBuilder,
+    Manager, Url, WebviewUrl, Window,
 };
 
-use crate::accounts::{self, Account, Config};
+use crate::accounts::{self, Config};
 use crate::{open_popup, DESKTOP_SCRIPT, LINK_SCRIPT, NOTIFICATIONS_SCRIPT};
 
 const HEADER_HEIGHT: f64 = 40.0;
 const FOOTER_HEIGHT: f64 = 36.0;
-/// Narrowest a pane may get; dragging the divider stops here.
-pub const PANE_MIN: f64 = 480.0;
-/// Width of the divider strip between panes, drawn by the split view.
-pub const HANDLE: f64 = 6.0;
 const MIN_HEIGHT: f64 = 600.0;
 const MIN_WIDTH: f64 = 800.0;
-const SPLIT_MIN_WIDTH: f64 = 2.0 * PANE_MIN + HANDLE;
+const SETTINGS: &str = "settings";
+/// Far enough left that a page placed there is not visible in any window.
+const OFFSCREEN_X: f64 = -30000.0;
+const MENU_WIDTH: f64 = 260.0;
+const MENU_ROW: f64 = 32.0;
+const MENU_PADDING: f64 = 8.0;
+const MENU_SEPARATOR: f64 = 9.0;
 
 pub(crate) fn local_asset_url(url: &Url) -> bool {
     match (url.scheme(), url.host_str()) {
@@ -39,13 +41,13 @@ pub enum LocalKind {
     Status,
     Settings,
     Titlebar,
-    Split,
+    TabMenu,
 }
 
 pub(crate) fn local_kind(label: &str) -> Option<LocalKind> {
     match label {
-        "settings" => Some(LocalKind::Settings),
-        accounts::SPLIT => Some(LocalKind::Split),
+        SETTINGS => Some(LocalKind::Settings),
+        accounts::TAB_MENU => Some(LocalKind::TabMenu),
         _ => {
             accounts::account_of(label)?;
             if label.starts_with("status-") {
@@ -59,13 +61,12 @@ pub(crate) fn local_kind(label: &str) -> Option<LocalKind> {
     }
 }
 
-/// Window that may host a local view: status and titlebar belong to their
-/// account's window (or `main` in split layout), the split view to `main`.
+/// Window that may host a local view: everything but Settings lives in `main`.
 fn owner_ok(label: &str, window_label: &str) -> bool {
     match local_kind(label) {
-        Some(LocalKind::Status | LocalKind::Titlebar) => accounts::account_of(label)
-            .is_some_and(|id| window_label == "main" || window_label == accounts::window_label(id)),
-        Some(LocalKind::Split) => window_label == "main",
+        Some(LocalKind::Status | LocalKind::Titlebar | LocalKind::TabMenu) => {
+            window_label == "main"
+        }
         Some(LocalKind::Settings) => true,
         None => false,
     }
@@ -106,90 +107,42 @@ fn vertical_bounds(height: f64, has_titlebar: bool, has_footer: bool) -> (f64, f
     (header, (height - footer).max(header + 1.0))
 }
 
-/// Horizontal `(x, width)` of each pane. Two panes split `width` minus the
-/// divider by `ratio`, never narrower than [`PANE_MIN`].
-pub fn split_rects(width: f64, ratio: f64, panes: usize) -> Vec<(f64, f64)> {
-    match panes {
-        0 => Vec::new(),
-        1 => vec![(0.0, width)],
-        2 => {
-            if width < SPLIT_MIN_WIDTH {
-                return vec![(0.0, PANE_MIN), (PANE_MIN + HANDLE, PANE_MIN)];
-            }
-            let left = ((width - HANDLE) * ratio).clamp(PANE_MIN, width - HANDLE - PANE_MIN);
-            vec![(0.0, left), (left + HANDLE, width - HANDLE - left)]
-        }
-        n => {
-            let each = (width - HANDLE * (n as f64 - 1.0)) / n as f64;
-            (0..n).map(|i| (i as f64 * (each + HANDLE), each)).collect()
-        }
-    }
-}
-
-const SETTINGS: &str = "settings";
-/// Far enough left that a page placed there is not visible in any window.
-const OFFSCREEN_X: f64 = -30000.0;
-
-fn is_account_window(label: &str) -> bool {
-    label == "main" || label.starts_with("acct-")
-}
-
 fn is_remote(label: &str) -> bool {
     label.starts_with("messenger-") && accounts::account_of(label).is_some()
 }
 
+/// Lays the main window's views out: the shown account's page fills the body,
+/// the other open pages wait off screen so they keep running.
 pub fn resize(window: &Window) -> tauri::Result<()> {
-    if !is_account_window(window.label()) {
+    if window.label() != "main" {
         return Ok(());
     }
     let (width, height) = bounds(window)?;
     let views = window.webviews();
-    let kind_of = |label: &str| local_kind(label);
     let (header, body_bottom) = vertical_bounds(
         height,
         views
             .iter()
-            .any(|v| kind_of(v.label()) == Some(LocalKind::Titlebar)),
+            .any(|v| local_kind(v.label()) == Some(LocalKind::Titlebar)),
         views
             .iter()
-            .any(|v| kind_of(v.label()) == Some(LocalKind::Status)),
+            .any(|v| local_kind(v.label()) == Some(LocalKind::Status)),
     );
     let body_height = body_bottom - header;
-    let split = views.iter().any(|v| v.label() == accounts::SPLIT);
-    let config = accounts::snapshot(&window.app_handle().clone());
-    let switching = window.label() == "main" && config.is_switch();
-    if split && width + 0.5 < SPLIT_MIN_WIDTH {
-        // The OS minimum can come out narrower than asked for on a frameless
-        // window. Snap back; the resulting resize event lays the views out.
-        return window.set_size(LogicalSize::new(SPLIT_MIN_WIDTH, height));
-    }
-    if split {
-        let remotes = config
-            .accounts
-            .iter()
-            .filter_map(|a| window.get_webview(&accounts::remote_label(&a.id)))
-            .collect::<Vec<_>>();
-        let rects = split_rects(width, config.split_ratio, remotes.len());
-        for (webview, (x, pane_width)) in remotes.iter().zip(rects) {
-            webview.set_position(LogicalPosition::new(x, header))?;
-            webview.set_size(LogicalSize::new(pane_width, body_height))?;
-        }
+    let shown = accounts::remote_label(&accounts::snapshot(&window.app_handle().clone()).active);
+    if let Some(menu) = tab_menu(window) {
+        // The dropdown is anchored to the old size.
+        let _ = menu.close();
     }
     for webview in views {
         let label = webview.label();
         if is_remote(label) {
-            if switching {
-                let shown = label == accounts::remote_label(config.shown_account());
-                let x = if shown { 0.0 } else { OFFSCREEN_X };
-                webview.set_position(LogicalPosition::new(x, header))?;
-                webview.set_size(LogicalSize::new(width, body_height))?;
-            } else if !split {
-                webview.set_position(LogicalPosition::new(0.0, header))?;
-                webview.set_size(LogicalSize::new(width, body_height))?;
-            }
+            let x = if label == shown { 0.0 } else { OFFSCREEN_X };
+            webview.set_position(LogicalPosition::new(x, header))?;
+            webview.set_size(LogicalSize::new(width, body_height))?;
             continue;
         }
-        match kind_of(label) {
+        match local_kind(label) {
             Some(LocalKind::Titlebar) => {
                 webview.set_position(LogicalPosition::new(0.0, 0.0))?;
                 webview.set_size(LogicalSize::new(width, HEADER_HEIGHT))?;
@@ -198,11 +151,11 @@ pub fn resize(window: &Window) -> tauri::Result<()> {
                 webview.set_position(LogicalPosition::new(0.0, body_bottom))?;
                 webview.set_size(LogicalSize::new(width, (height - body_bottom).max(1.0)))?;
             }
-            Some(LocalKind::Split | LocalKind::Settings) => {
+            Some(LocalKind::Settings) => {
                 webview.set_position(LogicalPosition::new(0.0, header))?;
                 webview.set_size(LogicalSize::new(width, body_height))?;
             }
-            _ => {}
+            Some(LocalKind::TabMenu) | None => {}
         }
     }
     Ok(())
@@ -235,25 +188,16 @@ fn local_builder(label: String, query: &str) -> WebviewBuilder<tauri::Wry> {
         .on_navigation(local_asset_url)
 }
 
-fn add_titlebar(
-    window: &Window,
-    account: &str,
-    width: f64,
-    tabs: Option<&Config>,
-) -> tauri::Result<()> {
-    let query = match tabs {
-        Some(config) => {
-            let all = config.accounts.iter().collect::<Vec<_>>();
-            format!(
-                "view=titlebar&accounts={}&active={}",
-                accounts::accounts_param(&all),
-                config.shown_account()
-            )
-        }
-        None => "view=titlebar".to_string(),
-    };
+fn add_titlebar(window: &Window, config: &Config, width: f64) -> tauri::Result<()> {
+    let all = config.accounts.iter().collect::<Vec<_>>();
+    let query = format!(
+        "view=titlebar&accounts={}&open={}&active={}",
+        accounts::accounts_param(&all),
+        config.open.join(","),
+        config.shown_account()
+    );
     let header = window.add_child(
-        local_builder(accounts::titlebar_label(account), &query),
+        local_builder(accounts::titlebar_label(accounts::FIRST), &query),
         LogicalPosition::new(0.0, 0.0),
         LogicalSize::new(width, HEADER_HEIGHT),
     );
@@ -265,10 +209,9 @@ fn add_titlebar(
     Ok(())
 }
 
-fn add_status(window: &Window, account: &str, width: f64, height: f64) -> tauri::Result<()> {
-    let query = "view=status";
+fn add_status(window: &Window, width: f64, height: f64) -> tauri::Result<()> {
     let footer = window.add_child(
-        local_builder(accounts::status_label(account), &query),
+        local_builder(accounts::status_label(accounts::FIRST), "view=status"),
         LogicalPosition::new(0.0, (height - FOOTER_HEIGHT).max(1.0)),
         LogicalSize::new(width, FOOTER_HEIGHT),
     );
@@ -279,89 +222,12 @@ fn add_status(window: &Window, account: &str, width: f64, height: f64) -> tauri:
     Ok(())
 }
 
-/// One account in its own window: page, title bar and status footer.
-fn mount_account(
-    app: &AppHandle,
-    window: &Window,
-    account: &Account,
-    show: bool,
-) -> tauri::Result<()> {
-    let (width, height) = bounds(window)?;
-    window.add_child(
-        remote_builder(app, &account.id),
-        LogicalPosition::new(0.0, 0.0),
-        LogicalSize::new(width, height),
-    )?;
-    add_titlebar(window, &account.id, width, None)?;
-    add_status(window, &account.id, width, height)?;
-    resize(window)?;
-    #[cfg(debug_assertions)]
-    eprintln!("Messenger webviews mounted: {}", window.webviews().len());
-    if show {
-        window.show()?;
-    }
-    Ok(())
-}
-
-/// All accounts as panes of the main window, with a shell view below the
-/// panes that draws the draggable divider.
-fn mount_split(app: &AppHandle, window: &Window, config: &Config, show: bool) -> tauri::Result<()> {
-    window.set_min_size(Some(LogicalSize::new(SPLIT_MIN_WIDTH, MIN_HEIGHT)))?;
-    let (width, height) = bounds(window)?;
-    let (width, height) = if width < SPLIT_MIN_WIDTH {
-        window.set_size(LogicalSize::new(SPLIT_MIN_WIDTH, height))?;
-        bounds(window)?
-    } else {
-        (width, height)
-    };
-    add_titlebar(window, accounts::FIRST, width, None)?;
-    let ids = config
-        .accounts
-        .iter()
-        .map(|a| a.id.as_str())
-        .collect::<Vec<_>>()
-        .join(",");
-    let query = format!("view=split&ratio={}&accounts={ids}", config.split_ratio);
-    window.add_child(
-        local_builder(accounts::SPLIT.to_string(), &query),
-        LogicalPosition::new(0.0, HEADER_HEIGHT),
-        LogicalSize::new(width, height - HEADER_HEIGHT - FOOTER_HEIGHT),
-    )?;
-    for account in &config.accounts {
-        window.add_child(
-            remote_builder(app, &account.id),
-            LogicalPosition::new(0.0, HEADER_HEIGHT),
-            LogicalSize::new(PANE_MIN, height - HEADER_HEIGHT - FOOTER_HEIGHT),
-        )?;
-    }
-    add_status(window, accounts::FIRST, width, height)?;
-    resize(window)?;
-    if show {
-        window.show()?;
-    }
-    Ok(())
-}
-
-/// One window holding every account's page; the title bar tabs pick which
-/// one is on screen. The others stay mounted off screen so their pages keep
-/// running and can still raise notifications.
-fn mount_switch(
-    app: &AppHandle,
-    window: &Window,
-    config: &Config,
-    show: bool,
-) -> tauri::Result<()> {
+/// Title bar and status footer of the main window.
+fn mount_chrome(window: &Window, config: &Config, show: bool) -> tauri::Result<()> {
     window.set_min_size(Some(LogicalSize::new(MIN_WIDTH, MIN_HEIGHT)))?;
     let (width, height) = bounds(window)?;
-    add_titlebar(window, accounts::FIRST, width, Some(config))?;
-    for account in &config.accounts {
-        window.add_child(
-            remote_builder(app, &account.id),
-            LogicalPosition::new(0.0, HEADER_HEIGHT),
-            LogicalSize::new(width, height - HEADER_HEIGHT - FOOTER_HEIGHT),
-        )?;
-    }
-    add_status(window, accounts::FIRST, width, height)?;
+    add_titlebar(window, config, width)?;
+    add_status(window, width, height)?;
     resize(window)?;
     if show {
         window.show()?;
@@ -369,197 +235,188 @@ fn mount_switch(
     Ok(())
 }
 
-static LAYOUT_LOCK: Mutex<()> = Mutex::new(());
+static TABS_LOCK: Mutex<()> = Mutex::new(());
 
-fn remaining_views(app: &AppHandle) -> usize {
-    let main = app
-        .get_window("main")
-        .map_or(0, |window| window.webviews().len());
-    let others = app
-        .windows()
-        .keys()
-        .filter(|label| label.starts_with("acct-"))
-        .count();
-    main + others
-}
-
-fn rebuild(app: &AppHandle, show_main: Option<bool>) -> tauri::Result<()> {
-    let config = accounts::snapshot(app);
-    let main = app
-        .get_window("main")
-        .ok_or_else(|| tauri::Error::WindowNotFound)?;
-    let reopen = app
-        .windows()
-        .into_iter()
-        .filter(|(label, window)| {
-            label.starts_with("acct-") && window.is_visible().unwrap_or(false)
-        })
-        .map(|(label, _)| label)
-        .collect::<Vec<_>>();
-    for (label, window) in app.windows() {
-        if label.starts_with("acct-") {
-            window.destroy()?;
-        }
-    }
-    let overlay_open = settings_overlay(&main).is_some();
-    for webview in main.webviews() {
-        webview.close()?;
-    }
+fn wait_until(mut done: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_secs(2);
-    while remaining_views(app) > 0 && Instant::now() < deadline {
+    while !done() {
+        if Instant::now() >= deadline {
+            return false;
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
-    if remaining_views(app) > 0 {
-        eprintln!("previous views are still closing; mounting anyway");
-    }
+    true
+}
 
-    let show_main = show_main.unwrap_or_else(|| main.is_visible().unwrap_or(true));
-    if config.is_split() {
-        mount_split(app, &main, &config, show_main)?;
-    } else if config.is_switch() {
-        mount_switch(app, &main, &config, show_main)?;
-    } else {
-        main.set_min_size(Some(LogicalSize::new(MIN_WIDTH, MIN_HEIGHT)))?;
-        let first = &config.accounts[0];
-        mount_account(app, &main, first, show_main)?;
-        let mut windows = vec![main.clone()];
-        for account in config.accounts.iter().skip(1) {
-            let label = accounts::window_label(&account.id);
-            let window = WindowBuilder::new(app, &label)
-                .title(format!("Messenger - {}", account.name))
-                .inner_size(MIN_WIDTH, MIN_HEIGHT)
-                .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
-                .decorations(false)
-                .visible(false)
-                .center()
-                .build()?;
-            mount_account(app, &window, account, reopen.contains(&label))?;
-            windows.push(window);
-        }
-        arrange_windows(&main, &windows);
+/// Makes the main window's pages match the stored open tabs: closes pages of
+/// closed tabs, creates pages of new ones and shows the active one.
+fn reconcile(app: &AppHandle) -> tauri::Result<()> {
+    let config = accounts::snapshot(app);
+    let main = app.get_window("main").ok_or(tauri::Error::WindowNotFound)?;
+    close_tab_menu_now(&main);
+    let stale = main
+        .webviews()
+        .into_iter()
+        .filter(|v| {
+            is_remote(v.label())
+                && accounts::account_of(v.label()).is_some_and(|id| !config.is_open(id))
+        })
+        .collect::<Vec<_>>();
+    for webview in &stale {
+        webview.close()?;
     }
-    if overlay_open {
+    if !wait_until(|| stale.iter().all(|v| main.get_webview(v.label()).is_none())) {
+        eprintln!("closed tabs are still shutting down");
+    }
+    let missing = config
+        .open
+        .iter()
+        .filter(|id| main.get_webview(&accounts::remote_label(id)).is_none())
+        .collect::<Vec<_>>();
+    // Pages added later sit above older views, so Settings drawn over the
+    // page is rebuilt on top of them.
+    let overlay = !missing.is_empty() && settings_overlay(&main).is_some();
+    if overlay {
+        if let Some(view) = settings_overlay(&main) {
+            view.close()?;
+        }
+        wait_until(|| settings_overlay(&main).is_none());
+    }
+    let (width, height) = bounds(&main)?;
+    let (header, body_bottom) = vertical_bounds(height, true, true);
+    for id in missing {
+        main.add_child(
+            remote_builder(app, id),
+            LogicalPosition::new(OFFSCREEN_X, header),
+            LogicalSize::new(width, body_bottom - header),
+        )?;
+    }
+    if overlay {
         add_settings_overlay(&main)?;
+    }
+    resize(&main)?;
+    if settings_overlay(&main).is_none() {
+        if let Some(webview) = app.get_webview(&accounts::remote_label(config.shown_account())) {
+            let _ = webview.set_focus();
+        }
     }
     Ok(())
 }
 
-/// Top-left corners that put windows of `sizes` in one centered row inside
-/// `area` (x, y, width, height), or `None` when they do not fit side by side.
-fn row_positions(area: (i32, i32, u32, u32), sizes: &[(u32, u32)]) -> Option<Vec<(i32, i32)>> {
-    let total: u64 = sizes.iter().map(|s| u64::from(s.0)).sum();
-    if sizes.len() < 2 || total > u64::from(area.2) {
-        return None;
-    }
-    let mut x = area.0 + ((u64::from(area.2) - total) / 2) as i32;
-    Some(
-        sizes
-            .iter()
-            .map(|&(width, height)| {
-                let y = area.1 + (i64::from(area.3) - i64::from(height)).max(0) as i32 / 2;
-                let position = (x, y);
-                x += width as i32;
-                position
-            })
-            .collect(),
-    )
-}
-
-/// Lines the account windows up so they can all be seen at once when the
-/// screen is wide enough; otherwise they keep their centered placement.
-fn arrange_windows(anchor: &Window, windows: &[Window]) {
-    let Ok(Some(monitor)) = anchor.current_monitor() else {
-        return;
-    };
-    let area = monitor.work_area();
-    let sizes = windows
-        .iter()
-        .filter_map(|w| w.outer_size().ok().map(|s| (s.width, s.height)))
-        .collect::<Vec<_>>();
-    if sizes.len() != windows.len() {
-        return;
-    }
-    let rect = (
-        area.position.x,
-        area.position.y,
-        area.size.width,
-        area.size.height,
-    );
-    if let Some(positions) = row_positions(rect, &sizes) {
-        for (window, (x, y)) in windows.iter().zip(positions) {
-            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-        }
-    }
-}
-
-/// Tears down and mounts every account view for the stored layout. Runs on a
-/// worker: WebView2 creation must not block the event loop. `show_main` is
-/// `None` to keep the main window's current visibility. `after` runs on the
-/// worker once the old views are gone and the new ones are mounted.
-pub fn apply_layout(
-    app: &AppHandle,
-    show_main: Option<bool>,
-    after: impl FnOnce() + Send + 'static,
-) {
+/// Brings the pages in line with the open tabs on a worker (WebView2 creation
+/// must not block the event loop), then runs `after`.
+pub fn sync_tabs(app: &AppHandle, after: impl FnOnce() + Send + 'static) {
     let app = app.clone();
     std::thread::spawn(move || {
-        let _serial = LAYOUT_LOCK.lock();
-        if let Err(error) = rebuild(&app, show_main) {
+        let _serial = TABS_LOCK.lock();
+        if let Err(error) = reconcile(&app) {
+            eprintln!("could not update Messenger tabs: {error}");
+        }
+        after();
+    });
+}
+
+/// Creates the title bar, footer and open tabs. Runs on a worker.
+pub fn apply_layout(app: &AppHandle, show_main: bool) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let _serial = TABS_LOCK.lock();
+        let config = accounts::snapshot(&app);
+        let result = app
+            .get_window("main")
+            .ok_or(tauri::Error::WindowNotFound)
+            .and_then(|main| mount_chrome(&main, &config, show_main))
+            .and_then(|()| reconcile(&app));
+        if let Err(error) = result {
             eprintln!("could not initialize Messenger views: {error}");
             if let Some(window) = app.get_window("main") {
                 let _ = window.set_decorations(true);
                 let _ = window.show();
             }
         }
-        after();
     });
 }
 
-#[derive(Deserialize)]
-pub struct PaneRect {
-    x: f64,
-    width: f64,
-}
-
-/// Split ratio implied by pane rectangles reported by the split view, or an
-/// error when they are not a plausible layout of `panes` panes in `body_width`.
-fn ratio_from_rects(rects: &[PaneRect], body_width: f64, panes: usize) -> Result<f64, String> {
-    if panes != 2 || rects.len() != panes {
-        return Err("pane count mismatch".into());
-    }
-    let sane = rects.iter().all(|r| {
-        r.x.is_finite()
-            && r.width.is_finite()
-            && r.x >= 0.0
-            && r.width >= PANE_MIN - 1.0
-            && r.x + r.width <= body_width + 1.0
-    });
-    if !sane {
-        return Err("invalid pane layout".into());
-    }
-    Ok(rects[0].width / (rects[0].width + rects[1].width))
-}
-
-/// Only the split view reports divider drags; the ratio is all Rust keeps.
-#[tauri::command]
-pub fn set_split_layout(
-    app: AppHandle,
-    webview: tauri::Webview,
-    rects: Vec<PaneRect>,
-) -> Result<(), String> {
-    if !local_webview(&webview, &[LocalKind::Split]) {
-        return Err("split view required".into());
-    }
-    let window = webview.window();
-    let (width, _) = bounds(&window).map_err(|_| "window unavailable")?;
-    let panes = window
+fn tab_menu(window: &Window) -> Option<tauri::Webview> {
+    window
         .webviews()
-        .iter()
-        .filter(|view| is_remote(view.label()))
-        .count();
-    let ratio = ratio_from_rects(&rects, width, panes)?;
-    accounts::set_ratio_live(&app, ratio)?;
-    resize(&window).map_err(|_| "could not resize views".to_string())
+        .into_iter()
+        .find(|v| v.label() == accounts::TAB_MENU)
+}
+
+fn close_tab_menu_now(window: &Window) {
+    if let Some(menu) = tab_menu(window) {
+        let _ = menu.close();
+    }
+}
+
+fn tab_menu_height(closed_accounts: usize) -> f64 {
+    let separator = if closed_accounts > 0 {
+        MENU_SEPARATOR
+    } else {
+        0.0
+    };
+    2.0 * MENU_PADDING + (closed_accounts as f64 + 1.0) * MENU_ROW + separator
+}
+
+static MENU_CLOSED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+/// A click on "+" that dismissed the open dropdown also reaches the button;
+/// it must not reopen the dropdown at once.
+const MENU_REOPEN_GUARD: Duration = Duration::from_millis(300);
+
+pub fn close_tab_menu(app: &AppHandle) {
+    if let Ok(mut closed) = MENU_CLOSED_AT.lock() {
+        *closed = Some(Instant::now());
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Some(main) = app.get_window("main") {
+            close_tab_menu_now(&main);
+        }
+    });
+}
+
+/// Opens the account dropdown under the "+" button at `x`, or closes it.
+pub fn toggle_tab_menu(app: &AppHandle, x: f64) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let Some(main) = app.get_window("main") else {
+            return;
+        };
+        if tab_menu(&main).is_some() {
+            close_tab_menu_now(&main);
+            return;
+        }
+        let recently_closed = MENU_CLOSED_AT
+            .lock()
+            .ok()
+            .and_then(|closed| *closed)
+            .is_some_and(|at| at.elapsed() < MENU_REOPEN_GUARD);
+        if recently_closed {
+            return;
+        }
+        let config = accounts::snapshot(&app);
+        let closed = config.closed();
+        let query = format!(
+            "view=tabmenu&accounts={}&next={}",
+            accounts::accounts_param(&closed),
+            config.next_id
+        );
+        let result = bounds(&main).and_then(|(width, _)| {
+            let left = x.clamp(0.0, (width - MENU_WIDTH).max(0.0));
+            main.add_child(
+                local_builder(accounts::TAB_MENU.to_string(), &query),
+                LogicalPosition::new(left, HEADER_HEIGHT),
+                LogicalSize::new(MENU_WIDTH, tab_menu_height(closed.len())),
+            )
+        });
+        match result {
+            Ok(menu) => {
+                let _ = menu.set_focus();
+            }
+            Err(error) => eprintln!("could not open the account menu: {error}"),
+        }
+    });
 }
 
 static SETTINGS_OPENING: AtomicBool = AtomicBool::new(false);
@@ -728,15 +585,16 @@ mod tests {
     #[test]
     fn local_kinds_come_from_the_label_alone() {
         assert_eq!(local_kind("status-a1"), Some(LocalKind::Status));
-        assert_eq!(local_kind("titlebar-a2"), Some(LocalKind::Titlebar));
+        assert_eq!(local_kind("titlebar-a1"), Some(LocalKind::Titlebar));
         assert_eq!(local_kind("settings"), Some(LocalKind::Settings));
-        assert_eq!(local_kind("split"), Some(LocalKind::Split));
+        assert_eq!(local_kind("tabmenu"), Some(LocalKind::TabMenu));
         for other in [
             "status",
             "titlebar",
             "messenger-a1",
             "status-a1x",
             "status-../x",
+            "split",
             "main",
             "popup-1",
             "",
@@ -746,83 +604,22 @@ mod tests {
     }
 
     #[test]
-    fn local_views_only_work_inside_their_own_window() {
+    fn local_views_only_work_inside_the_main_window() {
         assert!(owner_ok("status-a1", "main"));
-        assert!(owner_ok("status-a2", "acct-a2"));
-        assert!(owner_ok("titlebar-a2", "acct-a2"));
-        // Split layout keeps every status and title bar in main.
-        assert!(owner_ok("status-a1", "main"));
-        assert!(!owner_ok("status-a2", "acct-a3"));
-        assert!(!owner_ok("status-a1", "acct-a2"));
+        assert!(owner_ok("titlebar-a1", "main"));
+        assert!(owner_ok("tabmenu", "main"));
+        assert!(!owner_ok("tabmenu", "settings"));
         assert!(!owner_ok("status-a1", "settings"));
-        assert!(owner_ok("split", "main"));
-        assert!(!owner_ok("split", "acct-a2"));
+        assert!(!owner_ok("titlebar-a1", "popup-1"));
         assert!(owner_ok("settings", "settings"));
+        assert!(owner_ok("settings", "main"));
         assert!(!owner_ok("messenger-a1", "main"));
     }
 
     #[test]
-    fn two_panes_fill_the_width_and_stop_at_the_minimum() {
-        let rects = split_rects(966.0, 0.5, 2);
-        assert_eq!(rects, vec![(0.0, 480.0), (486.0, 480.0)]);
-        let rects = split_rects(1206.0, 0.5, 2);
-        assert_eq!(rects, vec![(0.0, 600.0), (606.0, 600.0)]);
-        // A ratio near either end locks at the minimum pane width.
-        let rects = split_rects(1206.0, 0.9, 2);
-        assert_eq!(rects[1].1, 480.0);
-        assert_eq!(rects[0].1, 720.0);
-        let rects = split_rects(1206.0, 0.1, 2);
-        assert_eq!(rects[0].1, 480.0);
-        assert_eq!(rects[1].0, 486.0);
-    }
-
-    #[test]
-    fn windows_form_one_centered_row_only_when_they_fit() {
-        let area = (0, 0, 3000, 1400);
-        let sizes = [(802, 602), (802, 602)];
-        assert_eq!(
-            row_positions(area, &sizes),
-            Some(vec![(698, 399), (1500, 399)])
-        );
-        // Offset monitors keep their origin.
-        assert_eq!(
-            row_positions((-1920, 200, 1920, 1000), &sizes).unwrap()[0],
-            (-1920 + 158, 200 + 199)
-        );
-        assert_eq!(row_positions((0, 0, 1500, 900), &sizes), None);
-        assert_eq!(row_positions(area, &[(802, 602)]), None);
-    }
-
-    #[test]
-    fn narrow_windows_never_panic_or_shrink_panes() {
-        let rects = split_rects(500.0, 0.5, 2);
-        assert_eq!(rects, vec![(0.0, 480.0), (486.0, 480.0)]);
-        assert_eq!(split_rects(0.0, 0.5, 2).len(), 2);
-    }
-
-    #[test]
-    fn one_pane_takes_the_whole_width_and_none_is_empty() {
-        assert_eq!(split_rects(900.0, 0.5, 1), vec![(0.0, 900.0)]);
-        assert!(split_rects(900.0, 0.5, 0).is_empty());
-    }
-
-    fn rect(x: f64, width: f64) -> PaneRect {
-        PaneRect { x, width }
-    }
-
-    #[test]
-    fn reported_panes_become_a_ratio_only_when_plausible() {
-        let ok = [rect(0.0, 600.0), rect(606.0, 600.0)];
-        assert_eq!(ratio_from_rects(&ok, 1206.0, 2), Ok(0.5));
-        let skewed = [rect(0.0, 480.0), rect(486.0, 720.0)];
-        assert_eq!(ratio_from_rects(&skewed, 1206.0, 2), Ok(0.4));
-        // Wrong count, below the minimum, outside the body, not finite, negative.
-        assert!(ratio_from_rects(&ok[..1], 1206.0, 2).is_err());
-        assert!(ratio_from_rects(&ok, 1206.0, 1).is_err());
-        assert!(ratio_from_rects(&[rect(0.0, 300.0), rect(306.0, 900.0)], 1206.0, 2).is_err());
-        assert!(ratio_from_rects(&[rect(0.0, 600.0), rect(606.0, 900.0)], 1206.0, 2).is_err());
-        assert!(ratio_from_rects(&[rect(0.0, f64::NAN), rect(6.0, 600.0)], 1206.0, 2).is_err());
-        assert!(ratio_from_rects(&[rect(-5.0, 600.0), rect(606.0, 600.0)], 1206.0, 2).is_err());
+    fn the_dropdown_has_a_row_per_closed_account_plus_the_sign_in_row() {
+        assert_eq!(tab_menu_height(0), 16.0 + 32.0);
+        assert_eq!(tab_menu_height(2), 16.0 + 3.0 * 32.0 + 9.0);
     }
 
     #[test]

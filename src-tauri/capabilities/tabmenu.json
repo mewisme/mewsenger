@@ -1,0 +1,12 @@
+{
+  "identifier": "tabmenu",
+  "description": "Account dropdown under the tab strip",
+  "webviews": [
+    "tabmenu"
+  ],
+  "permissions": [
+    "allow-open-account",
+    "allow-add-account",
+    "allow-close-tab-menu"
+  ]
+}

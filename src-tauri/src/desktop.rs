@@ -57,52 +57,38 @@ pub(crate) fn show_main(app: &AppHandle) {
     }
 }
 
-/// Brings the window that hosts `account` to the front; in the switching
-/// layout that window starts showing `account`.
+/// Brings the main window to the front showing `account`'s tab, opening the
+/// tab first when the account has none.
 pub(crate) fn show_account(app: &AppHandle, account: &str) {
     let config = accounts::snapshot(app);
-    if config.is_switch() && config.shown_account() != account {
-        let _ = accounts::switch_to(app, account);
-    }
-    match accounts::host_window(app, account) {
-        Some(window) => show_window(&window),
-        None => show_main(app),
-    }
-}
-
-fn is_account_window(label: &str) -> bool {
-    label == MAIN || label.starts_with("acct-")
-}
-
-fn show_all(app: &AppHandle) {
-    for (label, window) in app.windows() {
-        if is_account_window(&label) {
-            let _ = window.show();
-            let _ = window.unminimize();
-        }
+    if config.account(account).is_some() && config.shown_account() != account {
+        let _ = accounts::activate(app, account);
     }
     show_main(app);
 }
 
+fn is_account_window(label: &str) -> bool {
+    label == MAIN
+}
+
+fn show_all(app: &AppHandle) {
+    show_main(app);
+}
+
 fn hide_all(app: &AppHandle) {
-    for (label, window) in app.windows() {
-        if is_account_window(&label) {
-            let _ = window.hide();
-        }
+    if let Some(window) = app.get_window(MAIN) {
+        let _ = window.hide();
     }
 }
 
-/// Opens an account's window, or focuses its pane in a single-window layout.
+/// Shows an account's tab and puts focus in its page.
 pub(crate) fn open_account(app: &AppHandle, account: &str) {
-    let config = accounts::snapshot(app);
-    if config.account(account).is_none() {
+    if accounts::snapshot(app).account(account).is_none() {
         return;
     }
     show_account(app, account);
-    if config.is_single_window() {
-        if let Some(webview) = app.get_webview(&accounts::remote_label(account)) {
-            let _ = webview.set_focus();
-        }
+    if let Some(webview) = app.get_webview(&accounts::remote_label(account)) {
+        let _ = webview.set_focus();
     }
 }
 
@@ -311,9 +297,9 @@ mod tests {
     }
 
     #[test]
-    fn closing_an_account_window_hides_it_but_other_windows_close() {
+    fn closing_the_main_window_hides_it_but_other_windows_close() {
         assert!(is_account_window("main"));
-        assert!(is_account_window("acct-a2"));
+        assert!(!is_account_window("acct-a2"));
         assert!(!is_account_window("settings"));
         assert!(!is_account_window("popup-1"));
     }

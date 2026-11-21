@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vi
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Settings } from "./settings";
-import type { AccountsConfig, LayoutMode } from "./accounts-section";
+import type { AccountsConfig } from "./accounts-section";
 
 const mock = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -166,11 +166,10 @@ test("the test notification button reports the request outcome", async () => {
 });
 
 const account = (id: string, name: string) => ({ id, name });
-const config = (names: string[], layout: LayoutMode = "windows"): AccountsConfig => ({
-  layout,
+const config = (names: string[], open: string[] = ["a1"], active = "a1"): AccountsConfig => ({
   settings: "window",
-  active: "a1",
-  split_ratio: 0.5,
+  active,
+  open,
   next_id: names.length + 1,
   accounts: names.map((name, index) => account(`a${index + 1}`, name)),
 });
@@ -259,41 +258,29 @@ test("removing needs a confirmation and can be cancelled", async () => {
   await waitFor(() => expect(screen.queryByLabelText("Name of Work")).toBeNull());
 });
 
-test("layout choice is sent and split is unavailable beyond two accounts", async () => {
-  backend(config(["A", "B"]), (command) => (command === "set_layout" ? config(["A", "B"], "split") : undefined));
-  const user = userEvent.setup();
-  const { unmount } = render(<Settings version="0.1.14" />);
-  expect((await screen.findByRole("radio", { name: /Separate windows/ })).getAttribute("aria-checked")).toBe("true");
-  expect(screen.getByRole("radiogroup", { name: "Layout" })).toBeTruthy();
-  await user.click(screen.getByRole("radio", { name: /Split panes/ }));
-  expect(mock.invoke).toHaveBeenCalledWith("set_layout", { layout: "split" });
-  await waitFor(() => expect(screen.getByRole("radio", { name: /Split panes/ }).getAttribute("aria-checked")).toBe("true"));
-  unmount();
-  backend(config(["A", "B", "C"]));
+test("explains that tabs and the last account are restored", async () => {
+  backend(config(["Home", "Work"]));
   render(<Settings version="0.1.14" />);
-  await screen.findByLabelText("Name of C");
-  expect((screen.getByRole("radio", { name: /Split panes/ }) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByText("Split supports up to 2 accounts")).toBeTruthy();
+  await screen.findByLabelText("Name of Home");
+  expect(screen.getByText("Open tabs and the account you used last are restored when Messenger starts.")).toBeTruthy();
 });
 
-test("the single-window layout can be chosen with any number of accounts", async () => {
-  backend(config(["A", "B", "C", "D"]), (command) => (command === "set_layout" ? config(["A", "B", "C", "D"], "switch") : undefined));
+test("cards tell which account is showing, open in a tab, or closed, and the button matches", async () => {
+  backend(config(["Home", "Work", "Spare"], ["a1", "a2"], "a2"), (command) => (command === "open_account" ? null : undefined));
   const user = userEvent.setup();
   render(<Settings version="0.1.14" />);
-  await user.click(await screen.findByRole("radio", { name: /Single window/ }));
-  expect(mock.invoke).toHaveBeenCalledWith("set_layout", { layout: "switch" });
-  await waitFor(() => expect(screen.getByRole("radio", { name: /Single window/ }).getAttribute("aria-checked")).toBe("true"));
-});
-
-test("in the single-window layout the shown account is marked and the others can be switched to", async () => {
-  backend({ ...config(["Home", "Work"], "switch"), active: "a2" }, (command) => (command === "open_account" ? null : undefined));
-  const user = userEvent.setup();
-  render(<Settings version="0.1.14" />);
-  expect(await screen.findByText("Showing")).toBeTruthy();
-  expect((screen.getByRole("button", { name: "Open Work" }) as HTMLButtonElement).disabled).toBe(true);
+  await screen.findByLabelText("Name of Home");
+  expect(screen.getAllByText("Showing").length).toBe(1);
+  expect(screen.getAllByText("Open").length).toBe(1);
+  const work = screen.getByRole("button", { name: "Open Work" }) as HTMLButtonElement;
+  expect(work.disabled).toBe(true);
+  expect(work.textContent).toBe("Switch");
+  expect(screen.getByRole("button", { name: "Open Home" }).textContent).toBe("Switch");
+  expect(screen.getByRole("button", { name: "Open Spare" }).textContent).toBe("Open tab");
   await user.click(screen.getByRole("button", { name: "Open Home" }));
   expect(mock.invoke).toHaveBeenCalledWith("open_account", { id: "a1" });
-  expect(screen.getAllByRole("button", { name: /^Open / }).every((b) => b.textContent === "Switch")).toBe(true);
+  await user.click(screen.getByRole("button", { name: "Open Spare" }));
+  expect(mock.invoke).toHaveBeenCalledWith("open_account", { id: "a3" });
 });
 
 test("where settings open is chosen separately and applies next time", async () => {
@@ -308,7 +295,7 @@ test("where settings open is chosen separately and applies next time", async () 
   expect(screen.getByText("Applies the next time settings open.")).toBeTruthy();
 });
 
-test("Open asks the backend to show that account and changes elsewhere refresh the list", async () => {
+test("Open tab asks the backend to show that account and changes elsewhere refresh the list", async () => {
   backend(config(["Home", "Work"]), (command) => (command === "open_account" ? null : undefined));
   const user = userEvent.setup();
   render(<Settings version="0.1.14" />);

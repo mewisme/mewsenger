@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DesktopApp } from "./app";
 
@@ -102,45 +102,97 @@ test("does not invent data outside the Tauri runtime", () => {
   expect(runtime.listen).not.toHaveBeenCalled();
 });
 
-test("local title bar never renders the bottom status bar or calls the backend", () => {
+test("title bar without parameters still renders one tab and the window controls", () => {
   runtime.view = "titlebar-a1";
   render(<DesktopApp />);
   expect(screen.getByRole("banner", { name: "Window title bar" })).toBeTruthy();
   expect(screen.getByRole("navigation", { name: "Window controls" })).toBeTruthy();
   expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
-  expect(screen.queryByRole("tablist")).toBeNull();
+  expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"))).toEqual(["Account 1"]);
+  expect(screen.queryByRole("button", { name: /^Close tab/ })).toBeNull();
   expect(runtime.invoke).not.toHaveBeenCalled();
-  expect(runtime.listen).not.toHaveBeenCalled();
 });
 
-test("the single-window title bar shows one tab per account and switches on click", async () => {
-  runtime.view = "titlebar-a1";
-  window.history.pushState({}, "", "/?view=titlebar&accounts=a1%3AHome%2Ca2%3AWork&active=a2");
-  const user = userEvent.setup();
-  render(<DesktopApp />);
-  const tabs = screen.getAllByRole("tab");
-  expect(tabs.map((tab) => tab.textContent)).toEqual(["Home", "Work"]);
-  expect(screen.getByRole("tab", { name: "Work" }).getAttribute("aria-selected")).toBe("true");
-  await user.click(screen.getByRole("tab", { name: "Home" }));
-  expect(runtime.invoke).toHaveBeenCalledWith("switch_account", { id: "a1" });
-  expect(screen.getByRole("tab", { name: "Home" }).getAttribute("aria-selected")).toBe("true");
-});
+const TABS_URL = "/?view=titlebar&accounts=a1%3AHome%2Ca2%3AWork%2Ca3%3ASpare&open=a1,a2&active=a2";
 
-test("tabs follow account changes announced by the backend", async () => {
+function openTitleBar(url = TABS_URL) {
   runtime.view = "titlebar-a1";
-  window.history.pushState({}, "", "/?view=titlebar&accounts=a1%3AHome%2Ca2%3AWork&active=a1");
+  window.history.pushState({}, "", url);
   let announce: ((event: { payload: unknown }) => void) | undefined;
   runtime.listen.mockImplementation((name: string, callback: never) => {
     if (name === "accounts-changed") announce = callback;
     return Promise.resolve(runtime.unlisten);
   });
   render(<DesktopApp />);
-  await waitFor(() => expect(announce).toBeTruthy());
-  await act(async () => announce?.({
-    payload: { accounts: [{ id: "a1", name: "Home" }, { id: "a2", name: "Phone" }], active: "a2" },
-  }));
-  expect(screen.getByRole("tab", { name: "Phone" }).getAttribute("aria-selected")).toBe("true");
+  return { announce: (payload: unknown) => act(async () => announce?.({ payload })) };
+}
+
+test("the title bar shows one tab per open account and switches on click", async () => {
+  const user = userEvent.setup();
+  openTitleBar();
+  expect(screen.getByRole("tablist")).toBeTruthy();
+  expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"))).toEqual(["Home", "Work"]);
+  expect(screen.getByRole("tab", { name: "Work" }).getAttribute("aria-selected")).toBe("true");
+  await user.click(screen.getByRole("tab", { name: "Home" }));
+  expect(runtime.invoke).toHaveBeenCalledWith("open_account", { id: "a1" });
+  expect(screen.getByRole("tab", { name: "Home" }).getAttribute("aria-selected")).toBe("true");
+});
+
+test("closing a tab goes through close_tab without switching to it; one tab has no close button", async () => {
+  const user = userEvent.setup();
+  const { announce } = openTitleBar();
+  await user.click(screen.getByRole("button", { name: "Close tab Home" }));
+  expect(runtime.invoke).toHaveBeenCalledWith("close_tab", { id: "a1" });
+  expect(runtime.invoke).not.toHaveBeenCalledWith("open_account", expect.anything());
+  fireEvent(screen.getByRole("tab", { name: "Work" }), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+  expect(runtime.invoke).toHaveBeenCalledWith("close_tab", { id: "a2" });
+  runtime.invoke.mockClear();
+  await announce({
+    accounts: [{ id: "a1", name: "Home" }, { id: "a2", name: "Work" }],
+    open: ["a2"],
+    active: "a2",
+  });
+  expect(screen.queryByRole("button", { name: /^Close tab/ })).toBeNull();
+  fireEvent(screen.getByRole("tab", { name: "Work" }), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+  expect(runtime.invoke).not.toHaveBeenCalled();
+});
+
+test("the plus button asks the backend for the menu at its own left edge", async () => {
+  const user = userEvent.setup();
+  openTitleBar();
+  const plus = screen.getByRole("button", { name: "New tab" });
+  expect(plus.getAttribute("aria-haspopup")).toBe("menu");
+  vi.spyOn(plus, "getBoundingClientRect").mockReturnValue({
+    left: 212, right: 236, top: 0, bottom: 24, width: 24, height: 24, x: 212, y: 0, toJSON: () => ({}),
+  });
+  await user.click(plus);
+  expect(runtime.invoke).toHaveBeenCalledWith("open_tab_menu", { x: 212 });
+});
+
+test("tabs follow account changes announced by the backend and ignore malformed payloads", async () => {
+  const { announce } = openTitleBar();
+  await waitFor(() => expect(runtime.listen).toHaveBeenCalledWith("accounts-changed", expect.any(Function)));
+  await announce({ accounts: "nope" });
+  await announce(null);
+  expect(screen.getAllByRole("tab").length).toBe(2);
+  await announce({
+    accounts: [{ id: "a1", name: "Home" }, { id: "a2", name: "Phone" }, { id: "a3", name: "Spare" }],
+    open: ["a1", "a2", "a3"],
+    active: "a3",
+  });
+  expect(screen.getAllByRole("tab").length).toBe(3);
+  expect(screen.getByRole("tab", { name: "Spare" }).getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByRole("tab", { name: "Phone" })).toBeTruthy();
   expect(screen.queryByRole("tab", { name: "Work" })).toBeNull();
+});
+
+test("the tab menu view renders the dropdown without a status bar", () => {
+  runtime.view = "tabmenu";
+  window.history.pushState({}, "", "/?view=tabmenu&accounts=a2%3AWork&next=3");
+  render(<DesktopApp />);
+  expect(screen.getByRole("menu")).toBeTruthy();
+  expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["WWork", "Sign in to a new account"]);
+  expect(screen.queryByRole("contentinfo", { name: "Application status" })).toBeNull();
 });
 
 test("removes the download and update subscriptions when the status view unmounts", async () => {

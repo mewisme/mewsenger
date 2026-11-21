@@ -2,12 +2,11 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
-pub const SPLIT: &str = "split";
+/// Label of the small view that lists accounts without an open tab.
+pub const TAB_MENU: &str = "tabmenu";
 pub const MAX_ACCOUNTS: usize = 4;
-pub const MAX_SPLIT_ACCOUNTS: usize = 2;
 const MAX_NAME_CHARS: usize = 24;
 pub const FIRST: &str = "a1";
 
@@ -15,17 +14,6 @@ pub const FIRST: &str = "a1";
 pub struct Account {
     pub id: String,
     pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Layout {
-    /// One window per account.
-    Windows,
-    /// One window; the title bar switches which account it shows.
-    Switch,
-    /// All accounts side by side in one window.
-    Split,
 }
 
 /// Where Settings opens: its own window, or over the main window's page.
@@ -40,11 +28,12 @@ pub enum SettingsPlacement {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Config {
-    pub layout: Layout,
     pub settings: SettingsPlacement,
-    /// Account shown by the switching layout; restored on the next start.
+    /// Tab on screen; restored on the next start.
     pub active: String,
-    pub split_ratio: f64,
+    /// Accounts that have a tab, in tab order. Closing a tab keeps the
+    /// account and its login; only removing the account deletes them.
+    pub open: Vec<String>,
     pub next_id: u32,
     pub accounts: Vec<Account>,
 }
@@ -52,10 +41,9 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            layout: Layout::Windows,
             settings: SettingsPlacement::Window,
             active: FIRST.into(),
-            split_ratio: 0.5,
+            open: vec![FIRST.into()],
             next_id: 2,
             accounts: vec![Account {
                 id: FIRST.into(),
@@ -65,13 +53,13 @@ impl Default for Config {
     }
 }
 
-fn clamp_ratio(ratio: f64) -> f64 {
-    ratio.clamp(0.2, 0.8)
-}
-
 /// Parses stored configuration; anything unusable falls back to the default.
 pub fn from_json(text: &str) -> Config {
-    let Ok(mut config) = serde_json::from_str::<Config>(text) else {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Config::default();
+    };
+    let has_tabs = value.get("open").is_some();
+    let Ok(mut config) = serde_json::from_value::<Config>(value) else {
         return Config::default();
     };
     let valid = !config.accounts.is_empty()
@@ -83,15 +71,12 @@ pub fn from_json(text: &str) -> Config {
             .iter()
             .enumerate()
             .all(|(i, a)| config.accounts[..i].iter().all(|b| b.id != a.id));
-    if !valid || !config.split_ratio.is_finite() {
+    if !valid {
         return Config::default();
     }
-    config.split_ratio = clamp_ratio(config.split_ratio);
-    if config.layout == Layout::Split && config.accounts.len() > MAX_SPLIT_ACCOUNTS {
-        config.layout = Layout::Windows;
-    }
-    if config.account(&config.active).is_none() {
-        config.active = FIRST.to_string();
+    if !has_tabs {
+        // Files from before tabs: every account was on screen.
+        config.open = config.accounts.iter().map(|a| a.id.clone()).collect();
     }
     let floor = config
         .accounts
@@ -101,6 +86,7 @@ pub fn from_json(text: &str) -> Config {
         .unwrap_or(1)
         + 1;
     config.next_id = config.next_id.max(floor);
+    config.normalize();
     config
 }
 
@@ -114,11 +100,42 @@ impl Config {
         self.accounts.iter().find(|a| a.id == id)
     }
 
-    pub fn name_of(&self, id: &str) -> String {
-        self.account(id)
-            .map_or_else(|| id.to_string(), |a| a.name.clone())
+    /// Keeps `open` to known, distinct accounts with at least one tab, and
+    /// `active` on one of them.
+    fn normalize(&mut self) {
+        let mut seen: Vec<String> = Vec::new();
+        for id in std::mem::take(&mut self.open) {
+            if self.account(&id).is_some() && !seen.contains(&id) {
+                seen.push(id);
+            }
+        }
+        if seen.is_empty() {
+            seen.push(self.accounts[0].id.clone());
+        }
+        self.open = seen;
+        if !self.open.contains(&self.active) {
+            self.active = self.open[0].clone();
+        }
     }
 
+    pub fn is_open(&self, id: &str) -> bool {
+        self.open.iter().any(|open| open == id)
+    }
+
+    /// Account on screen.
+    pub fn shown_account(&self) -> &str {
+        &self.active
+    }
+
+    /// Accounts without a tab, in account order.
+    pub fn closed(&self) -> Vec<&Account> {
+        self.accounts
+            .iter()
+            .filter(|a| !self.is_open(&a.id))
+            .collect()
+    }
+
+    /// Adds an account, opens its tab and shows it.
     pub fn add(&mut self, name: &str) -> Result<String, String> {
         if self.accounts.len() >= MAX_ACCOUNTS {
             return Err("account limit reached".into());
@@ -130,9 +147,8 @@ impl Config {
             id: id.clone(),
             name,
         });
-        if self.layout == Layout::Split && self.accounts.len() > MAX_SPLIT_ACCOUNTS {
-            self.layout = Layout::Windows;
-        }
+        self.open.push(id.clone());
+        self.active = id.clone();
         Ok(id)
     }
 
@@ -147,6 +163,7 @@ impl Config {
         Ok(())
     }
 
+    /// Deletes the account itself; its tab goes with it.
     pub fn remove(&mut self, id: &str) -> Result<(), String> {
         if id == FIRST {
             return Err("the first account cannot be removed".into());
@@ -157,58 +174,39 @@ impl Config {
             .position(|a| a.id == id)
             .ok_or("unknown account")?;
         self.accounts.remove(index);
-        if self.active == id {
-            self.active = FIRST.to_string();
-        }
+        self.open.retain(|open| open != id);
+        self.normalize();
         Ok(())
     }
 
-    pub fn set_layout(&mut self, layout: Layout) -> Result<(), String> {
-        if layout == Layout::Split && self.accounts.len() > MAX_SPLIT_ACCOUNTS {
-            return Err("split supports up to 2 accounts".into());
-        }
-        self.layout = layout;
-        Ok(())
-    }
-
-    pub fn set_split_ratio(&mut self, ratio: f64) -> Result<(), String> {
-        if !ratio.is_finite() {
-            return Err("invalid ratio".into());
-        }
-        self.split_ratio = clamp_ratio(ratio);
-        Ok(())
-    }
-
-    /// Split layout is only effective with two or more accounts.
-    pub fn is_split(&self) -> bool {
-        self.layout == Layout::Split && self.accounts.len() >= 2
-    }
-
-    /// Switching layout is only effective with two or more accounts.
-    pub fn is_switch(&self) -> bool {
-        self.layout == Layout::Switch && self.accounts.len() >= 2
-    }
-
-    /// All accounts live in the main window.
-    pub fn is_single_window(&self) -> bool {
-        self.is_split() || self.is_switch()
-    }
-
-    pub fn set_active(&mut self, id: &str) -> Result<(), String> {
+    /// Opens a tab for `id` if it has none and shows it.
+    pub fn open_tab(&mut self, id: &str) -> Result<(), String> {
         if self.account(id).is_none() {
             return Err("unknown account".into());
+        }
+        if !self.is_open(id) {
+            self.open.push(id.to_string());
         }
         self.active = id.to_string();
         Ok(())
     }
 
-    /// Account the single-window switching layout shows.
-    pub fn shown_account(&self) -> &str {
-        if self.account(&self.active).is_some() {
-            &self.active
-        } else {
-            FIRST
+    /// Closes a tab, never the last one. The neighbour takes over when the
+    /// active tab closes.
+    pub fn close_tab(&mut self, id: &str) -> Result<(), String> {
+        let index = self
+            .open
+            .iter()
+            .position(|open| open == id)
+            .ok_or("tab is not open")?;
+        if self.open.len() == 1 {
+            return Err("the last tab cannot be closed".into());
         }
+        self.open.remove(index);
+        if self.active == id {
+            self.active = self.open[index.min(self.open.len() - 1)].clone();
+        }
+        Ok(())
     }
 }
 
@@ -219,14 +217,6 @@ fn valid_name(name: &str) -> Result<String, String> {
         return Err("invalid account name".into());
     }
     Ok(name.to_string())
-}
-
-pub fn window_label(id: &str) -> String {
-    if id == FIRST {
-        "main".into()
-    } else {
-        format!("acct-{id}")
-    }
 }
 
 pub fn remote_label(id: &str) -> String {
@@ -241,12 +231,12 @@ pub fn status_label(id: &str) -> String {
     format!("status-{id}")
 }
 
-/// Account that owns a window or webview label, if the label is one of ours.
+/// Account that owns a webview label, if the label is one of ours.
 pub fn account_of(label: &str) -> Option<&str> {
     if label == "main" {
         return Some(FIRST);
     }
-    let id = ["messenger-", "titlebar-", "status-", "acct-"]
+    let id = ["messenger-", "titlebar-", "status-"]
         .iter()
         .find_map(|prefix| label.strip_prefix(prefix))?;
     valid_id(id).then_some(id)
@@ -311,65 +301,9 @@ pub fn mutate<T>(
     Ok((value, next))
 }
 
-/// Account whose Messenger page last reported window focus.
-pub struct ActiveAccount(pub Mutex<String>);
-
-impl Default for ActiveAccount {
-    fn default() -> Self {
-        Self(Mutex::new(FIRST.to_string()))
-    }
-}
-
-/// Window that shows an account: `main` in split layout, otherwise the
-/// account's own window.
-pub fn host_window(app: &AppHandle, account: &str) -> Option<tauri::Window> {
-    if snapshot(app).is_single_window() {
-        app.get_window("main")
-    } else {
-        app.get_window(&window_label(account))
-    }
-}
-
-/// Account that tray actions target: the one on screen in the switching
-/// layout, otherwise the one whose page last reported focus. Falls back to
-/// the first account when that page is gone.
+/// Account on screen, which tray actions target.
 pub fn active_account(app: &AppHandle) -> String {
-    let config = snapshot(app);
-    let active = if config.is_switch() {
-        config.shown_account().to_string()
-    } else {
-        app.try_state::<ActiveAccount>()
-            .and_then(|a| a.0.lock().ok().map(|a| a.clone()))
-            .unwrap_or_else(|| FIRST.to_string())
-    };
-    if app.get_webview(&remote_label(&active)).is_some() {
-        active
-    } else {
-        FIRST.to_string()
-    }
-}
-
-/// Updates the split ratio in memory at once and writes it to disk once the
-/// drag has settled, so a drag does not rewrite the file on every frame.
-pub fn set_ratio_live(app: &AppHandle, ratio: f64) -> Result<(), String> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static GENERATION: AtomicU64 = AtomicU64::new(0);
-    {
-        let state = app.state::<Mutex<Config>>();
-        let mut guard = state.lock().map_err(|_| "accounts unavailable")?;
-        guard.set_split_ratio(ratio)?;
-    }
-    let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
-    let app = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        if GENERATION.load(Ordering::Acquire) == generation {
-            if let Err(error) = save(&app, &snapshot(&app)) {
-                eprintln!("could not save accounts: {error}");
-            }
-        }
-    });
-    Ok(())
+    snapshot(app).shown_account().to_string()
 }
 
 fn encode_component(text: &str) -> String {
@@ -395,15 +329,28 @@ pub fn accounts_param(accounts: &[&Account]) -> String {
     encode_component(&inner)
 }
 
-fn settings_view(webview: &tauri::Webview) -> Result<(), String> {
-    if crate::shell::local_webview(webview, &[crate::shell::LocalKind::Settings]) {
+fn view_of(webview: &tauri::Webview, kinds: &[crate::shell::LocalKind]) -> Result<(), String> {
+    if crate::shell::local_webview(webview, kinds) {
         Ok(())
     } else {
-        Err("settings view required".into())
+        Err("local view required".into())
     }
 }
 
-/// Tells the settings view and every title bar that the configuration changed.
+fn settings_view(webview: &tauri::Webview) -> Result<(), String> {
+    view_of(webview, &[crate::shell::LocalKind::Settings])
+}
+
+/// Views that may open tabs: settings, the tab strip and its dropdown.
+fn tab_views(webview: &tauri::Webview) -> Result<(), String> {
+    use crate::shell::LocalKind;
+    view_of(
+        webview,
+        &[LocalKind::Settings, LocalKind::Titlebar, LocalKind::TabMenu],
+    )
+}
+
+/// Tells the settings view and the tab strip that the configuration changed.
 fn announce(app: &AppHandle, config: &Config) {
     let _ = app.emit_filter("accounts-changed", config, |target| {
         matches!(target, tauri::EventTarget::Webview { label }
@@ -411,60 +358,12 @@ fn announce(app: &AppHandle, config: &Config) {
     });
 }
 
-/// Makes `id` the account the switching layout shows and remembers it for the
-/// next start.
-pub fn switch_to(app: &AppHandle, id: &str) -> Result<Config, String> {
-    let (_, config) = mutate(app, |c| c.set_active(id))?;
-    if let Some(active) = app.try_state::<ActiveAccount>() {
-        if let Ok(mut active) = active.0.lock() {
-            *active = id.to_string();
-        }
-    }
+/// Opens a tab for `id` when it has none and shows it.
+pub fn activate(app: &AppHandle, id: &str) -> Result<Config, String> {
+    let (_, config) = mutate(app, |c| c.open_tab(id))?;
     announce(app, &config);
-    if config.is_switch() {
-        if let Some(window) = app.get_window("main") {
-            let _ = crate::shell::resize(&window);
-        }
-        if let Some(webview) = app.get_webview(&remote_label(id)) {
-            let _ = webview.set_focus();
-        }
-    }
+    crate::shell::sync_tabs(app, || {});
     Ok(config)
-}
-
-#[tauri::command]
-pub fn switch_account(
-    app: AppHandle,
-    webview: tauri::Webview,
-    id: String,
-) -> Result<Config, String> {
-    use crate::shell::{local_webview, LocalKind};
-    if !local_webview(&webview, &[LocalKind::Settings, LocalKind::Titlebar]) {
-        return Err("local view required".into());
-    }
-    switch_to(&app, &id)
-}
-
-#[tauri::command]
-pub fn set_settings_placement(
-    app: AppHandle,
-    webview: tauri::Webview,
-    placement: SettingsPlacement,
-) -> Result<Config, String> {
-    settings_view(&webview)?;
-    let (_, config) = mutate(&app, |c| {
-        c.settings = placement;
-        Ok(())
-    })?;
-    announce(&app, &config);
-    Ok(config)
-}
-
-#[tauri::command]
-pub fn close_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
-    settings_view(&webview)?;
-    crate::shell::close_settings(&app);
-    Ok(())
 }
 
 #[tauri::command]
@@ -479,11 +378,11 @@ pub fn add_account(
     webview: tauri::Webview,
     name: String,
 ) -> Result<Config, String> {
-    settings_view(&webview)?;
+    tab_views(&webview)?;
     let (_, config) = mutate(&app, |c| c.add(&name))?;
     crate::desktop::sync_accounts_menu(&app);
     announce(&app, &config);
-    crate::shell::apply_layout(&app, None, || {});
+    crate::shell::sync_tabs(&app, || {});
     Ok(config)
 }
 
@@ -496,11 +395,6 @@ pub fn rename_account(
 ) -> Result<Config, String> {
     settings_view(&webview)?;
     let (_, config) = mutate(&app, |c| c.rename(&id, &name))?;
-    if id != FIRST {
-        if let Some(window) = app.get_window(&window_label(&id)) {
-            let _ = window.set_title(&format!("Messenger - {}", config.name_of(&id)));
-        }
-    }
     crate::desktop::sync_accounts_menu(&app);
     announce(&app, &config);
     Ok(config)
@@ -514,18 +408,11 @@ pub fn remove_account(
 ) -> Result<Config, String> {
     settings_view(&webview)?;
     let (_, config) = mutate(&app, |c| c.remove(&id))?;
-    if let Some(active) = app.try_state::<ActiveAccount>() {
-        if let Ok(mut active) = active.0.lock() {
-            if *active == id {
-                *active = FIRST.to_string();
-            }
-        }
-    }
     crate::desktop::sync_accounts_menu(&app);
     announce(&app, &config);
     let cleanup_app = app.clone();
-    crate::shell::apply_layout(&app, None, move || {
-        crate::notifications::account_removed(&cleanup_app, &id);
+    crate::shell::sync_tabs(&app, move || {
+        crate::notifications::account_closed(&cleanup_app, &id);
         remove_data_directory(&cleanup_app, &id);
     });
     Ok(config)
@@ -550,25 +437,61 @@ fn remove_data_directory(app: &AppHandle, id: &str) {
 }
 
 #[tauri::command]
-pub fn set_layout(
+pub fn open_account(app: AppHandle, webview: tauri::Webview, id: String) -> Result<Config, String> {
+    tab_views(&webview)?;
+    activate(&app, &id)
+}
+
+/// Closes the tab only: the account, its login and its data stay.
+#[tauri::command]
+pub fn close_tab(app: AppHandle, webview: tauri::Webview, id: String) -> Result<Config, String> {
+    view_of(&webview, &[crate::shell::LocalKind::Titlebar])?;
+    let (_, config) = mutate(&app, |c| c.close_tab(&id))?;
+    announce(&app, &config);
+    let cleanup_app = app.clone();
+    crate::shell::sync_tabs(&app, move || {
+        crate::notifications::account_closed(&cleanup_app, &id);
+    });
+    Ok(config)
+}
+
+/// Opens or closes the account dropdown below the "+" button at `x`.
+#[tauri::command]
+pub fn open_tab_menu(app: AppHandle, webview: tauri::Webview, x: f64) -> Result<(), String> {
+    view_of(&webview, &[crate::shell::LocalKind::Titlebar])?;
+    if !x.is_finite() {
+        return Err("invalid position".into());
+    }
+    crate::shell::toggle_tab_menu(&app, x);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn close_tab_menu(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    view_of(&webview, &[crate::shell::LocalKind::TabMenu])?;
+    crate::shell::close_tab_menu(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_settings_placement(
     app: AppHandle,
     webview: tauri::Webview,
-    layout: Layout,
+    placement: SettingsPlacement,
 ) -> Result<Config, String> {
     settings_view(&webview)?;
-    let (_, config) = mutate(&app, |c| c.set_layout(layout))?;
+    let (_, config) = mutate(&app, |c| {
+        c.settings = placement;
+        Ok(())
+    })?;
     announce(&app, &config);
-    crate::shell::apply_layout(&app, None, || {});
     Ok(config)
 }
 
 #[tauri::command]
-pub fn open_account(app: AppHandle, webview: tauri::Webview, id: String) -> Result<(), String> {
+pub fn close_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
     settings_view(&webview)?;
-    if snapshot(&app).account(&id).is_none() {
-        return Err("unknown account".into());
-    }
-    crate::desktop::open_account(&app, &id);
+    crate::shell::close_settings(&app);
     Ok(())
 }
 
@@ -576,17 +499,18 @@ pub fn open_account(app: AppHandle, webview: tauri::Webview, id: String) -> Resu
 mod tests {
     use super::*;
 
+    fn two() -> Config {
+        let mut config = Config::default();
+        config.add("Second").unwrap();
+        config
+    }
+
     #[test]
     fn labels_round_trip_and_reject_lookalikes() {
-        assert_eq!(window_label("a1"), "main");
-        assert_eq!(window_label("a2"), "acct-a2");
         for id in ["a1", "a2", "a14"] {
             assert_eq!(account_of(&remote_label(id)), Some(id));
             assert_eq!(account_of(&titlebar_label(id)), Some(id));
             assert_eq!(account_of(&status_label(id)), Some(id));
-            if id != "a1" {
-                assert_eq!(account_of(&window_label(id)), Some(id));
-            }
         }
         assert_eq!(account_of("main"), Some("a1"));
         for bad in [
@@ -597,7 +521,8 @@ mod tests {
             "messenger-a1234",
             "messenger",
             "settings",
-            "split",
+            "tabmenu",
+            "acct-a2",
             "popup-1",
         ] {
             assert_eq!(account_of(bad), None, "{bad}");
@@ -622,6 +547,13 @@ mod tests {
     }
 
     #[test]
+    fn a_new_account_gets_a_tab_and_is_shown() {
+        let config = two();
+        assert_eq!(config.open, vec!["a1", "a2"]);
+        assert_eq!(config.shown_account(), "a2");
+    }
+
+    #[test]
     fn ids_are_never_reused() {
         let mut config = Config::default();
         config.add("B").unwrap();
@@ -638,22 +570,50 @@ mod tests {
     }
 
     #[test]
-    fn third_account_forces_windows_layout() {
-        let mut config = Config::default();
-        config.add("B").unwrap();
-        config.set_layout(Layout::Split).unwrap();
-        assert!(config.is_split());
-        config.add("C").unwrap();
-        assert_eq!(config.layout, Layout::Windows);
-        assert!(config.set_layout(Layout::Split).is_err());
-        assert_eq!(config.layout, Layout::Windows);
+    fn closing_a_tab_keeps_the_account_and_hands_over_to_a_neighbour() {
+        let mut config = two();
+        config.add("Third").unwrap();
+        config.open_tab("a2").unwrap();
+        config.close_tab("a2").unwrap();
+        assert_eq!(config.open, vec!["a1", "a3"]);
+        assert_eq!(config.shown_account(), "a3");
+        assert_eq!(config.accounts.len(), 3);
+        assert_eq!(config.closed().len(), 1);
+        assert_eq!(config.closed()[0].id, "a2");
+        // Closing a background tab leaves the shown one alone.
+        config.close_tab("a1").unwrap();
+        assert_eq!(config.shown_account(), "a3");
     }
 
     #[test]
-    fn split_needs_two_accounts_to_take_effect() {
-        let mut config = Config::default();
-        config.set_layout(Layout::Split).unwrap();
-        assert!(!config.is_split());
+    fn the_last_tab_and_unopened_tabs_cannot_be_closed() {
+        let mut config = two();
+        assert!(config.close_tab("a9").is_err());
+        config.close_tab("a2").unwrap();
+        assert!(config.close_tab("a1").is_err());
+        assert!(config.close_tab("a2").is_err());
+        assert_eq!(config.open, vec!["a1"]);
+    }
+
+    #[test]
+    fn reopening_a_closed_account_appends_a_tab_and_shows_it() {
+        let mut config = two();
+        config.close_tab("a2").unwrap();
+        config.open_tab("a2").unwrap();
+        assert_eq!(config.open, vec!["a1", "a2"]);
+        assert_eq!(config.shown_account(), "a2");
+        config.open_tab("a1").unwrap();
+        assert_eq!(config.open, vec!["a1", "a2"]);
+        assert_eq!(config.shown_account(), "a1");
+        assert!(config.open_tab("a9").is_err());
+    }
+
+    #[test]
+    fn removing_an_account_removes_its_tab() {
+        let mut config = two();
+        config.remove("a2").unwrap();
+        assert_eq!(config.open, vec!["a1"]);
+        assert_eq!(config.shown_account(), "a1");
     }
 
     #[test]
@@ -679,26 +639,28 @@ mod tests {
     }
 
     #[test]
-    fn stored_layout_ratio_and_next_id_are_repaired() {
+    fn files_from_before_tabs_open_every_account_and_keep_the_last_used_one() {
         let config = from_json(
-            "{\"layout\":\"split\",\"split_ratio\":0.95,\"next_id\":1,\"accounts\":[{\"id\":\"a1\",\"name\":\"A\"},{\"id\":\"a2\",\"name\":\"B\"},{\"id\":\"a3\",\"name\":\"C\"}]}",
+            r#"{"layout":"split","split_ratio":0.6,"active":"a2","next_id":1,"accounts":[{"id":"a1","name":"A"},{"id":"a2","name":"B"}]}"#,
         );
-        assert_eq!(config.layout, Layout::Windows);
-        assert_eq!(config.split_ratio, 0.8);
-        assert_eq!(config.next_id, 4);
-        assert_eq!(from_json("{\"split_ratio\":0.1}").split_ratio, 0.2);
+        assert_eq!(config.open, vec!["a1", "a2"]);
+        assert_eq!(config.shown_account(), "a2");
+        assert_eq!(config.next_id, 3);
+        assert_eq!(config.settings, SettingsPlacement::Window);
     }
 
     #[test]
-    fn ratio_is_clamped_and_must_be_finite() {
-        let mut config = Config::default();
-        config.set_split_ratio(0.0).unwrap();
-        assert_eq!(config.split_ratio, 0.2);
-        config.set_split_ratio(5.0).unwrap();
-        assert_eq!(config.split_ratio, 0.8);
-        assert!(config.set_split_ratio(f64::NAN).is_err());
-        assert!(config.set_split_ratio(f64::INFINITY).is_err());
-        assert_eq!(config.split_ratio, 0.8);
+    fn stored_tabs_are_repaired() {
+        let accounts = r#""accounts":[{"id":"a1","name":"A"},{"id":"a2","name":"B"}]"#;
+        let config = from_json(&format!(
+            r#"{{"open":["a2","a9","a2"],"active":"a1",{accounts}}}"#
+        ));
+        assert_eq!(config.open, vec!["a2"]);
+        assert_eq!(config.shown_account(), "a2");
+        let config = from_json(&format!(r#"{{"open":[],{accounts}}}"#));
+        assert_eq!(config.open, vec!["a1"]);
+        let again = from_json(&serde_json::to_string(&two()).unwrap());
+        assert_eq!(again, two());
     }
 
     #[test]
@@ -707,11 +669,11 @@ mod tests {
         assert!(config.rename("a9", "x").is_err());
         assert!(config.rename("a1", "").is_err());
         config.rename("a1", " Home ").unwrap();
-        assert_eq!(config.name_of("a1"), "Home");
+        assert_eq!(config.accounts[0].name, "Home");
     }
 
     #[test]
-    fn status_query_survives_commas_colons_and_non_ascii() {
+    fn local_view_query_survives_commas_colons_and_non_ascii() {
         let a = Account {
             id: "a2".into(),
             name: "Work, home: é".into(),
@@ -737,47 +699,5 @@ mod tests {
             String::from_utf8(bytes).unwrap(),
             "a2:Work%2C%20home%3A%20%C3%A9"
         );
-    }
-
-    #[test]
-    fn stored_files_from_before_switching_still_load() {
-        let config = from_json(
-            r#"{"layout":"split","split_ratio":0.6,"next_id":3,"accounts":[{"id":"a1","name":"Main"},{"id":"a2","name":"Second"}]}"#,
-        );
-        assert_eq!(config.layout, Layout::Split);
-        assert_eq!(config.active, "a1");
-        assert_eq!(config.settings, SettingsPlacement::Window);
-    }
-
-    #[test]
-    fn the_last_used_account_is_kept_until_it_is_removed() {
-        let mut config = Config::default();
-        config.add("Second").unwrap();
-        config.set_layout(Layout::Switch).unwrap();
-        assert!(config.set_active("a9").is_err());
-        config.set_active("a2").unwrap();
-        assert_eq!(config.shown_account(), "a2");
-        let again = from_json(&serde_json::to_string(&config).unwrap());
-        assert_eq!(again.shown_account(), "a2");
-        config.remove("a2").unwrap();
-        assert_eq!(config.shown_account(), "a1");
-        let mut stale = again;
-        stale.active = "a7".into();
-        assert_eq!(
-            from_json(&serde_json::to_string(&stale).unwrap()).active,
-            "a1"
-        );
-    }
-
-    #[test]
-    fn switching_needs_two_accounts_and_allows_four() {
-        let mut config = Config::default();
-        config.set_layout(Layout::Switch).unwrap();
-        assert!(!config.is_switch());
-        for n in 2..=4 {
-            config.add(&format!("Acc {n}")).unwrap();
-        }
-        assert!(config.is_switch() && config.is_single_window());
-        assert!(config.set_layout(Layout::Split).is_err());
     }
 }
