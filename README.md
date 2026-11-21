@@ -8,7 +8,7 @@ Messenger is a native desktop application that wraps the Messenger web interface
 
 ## Local desktop shell
 
-The main native window contains three separate WebViews: a **custom 40px title bar at the top** with drag and Minimize / Maximize / Restore / Close controls, Messenger at `https://www.messenger.com` in the center, and a **36px status bar at the bottom**. The title bar and status bar load local React/shadcn components from separate app URLs. Messenger is not embedded in an iframe or proxied through the local frontend. Only the main window is frameless; call popups and Credits keep native window chrome. If the title bar fails, native decorations are restored; if the optional footer fails, Messenger uses the remaining space.
+The main native window contains three separate WebViews: a **custom 40px title bar at the top** with drag and Minimize / Maximize / Restore / Close controls, Messenger at `https://www.messenger.com` in the center, and a **36px status bar at the bottom**. The title bar and status bar load local React/shadcn components from separate app URLs. Messenger is not embedded in an iframe or proxied through the local frontend. Only the main window is frameless; call popups and the Settings window keep native window chrome. If the title bar fails, native decorations are restored; if the optional footer fails, Messenger uses the remaining space.
 
 The footer is deliberately minimal: connection state, unread count, a download indicator and update button when relevant, and a Settings button. Unverified values remain unknown until synchronized. Settings also shows the bundled Messenger icon, the installed version and credits. The custom title bar also uses the icon from `src-tauri/icons/`. The app follows the system light/dark appearance.
 
