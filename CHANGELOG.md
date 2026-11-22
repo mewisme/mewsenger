@@ -2,6 +2,39 @@
 
 Generated from the commit history when a release is published.
 
+## [0.2.1](https://github.com/mewisme/mewsenger/compare/v0.2.0...v0.2.1) - 2026-11-22
+
+### Features
+
+- **tabs:** keep Settings open behind other tabs, shrink tabs to icons ([deae2dd](https://github.com/mewisme/mewsenger/commit/deae2dd))
+- **chat:** fill screens wider than the page cap ([6bfab94](https://github.com/mewisme/mewsenger/commit/6bfab94))
+- **theme:** drive Messenger's own appearance setting ([f0879cb](https://github.com/mewisme/mewsenger/commit/f0879cb))
+- **settings:** show settings as a title bar tab ([bfcd74f](https://github.com/mewisme/mewsenger/commit/bfcd74f))
+- **ui:** i18n and a redesigned settings window ([511f856](https://github.com/mewisme/mewsenger/commit/511f856))
+- **settings:** auto updates, close to tray, theme sync, gear toggle ([248a463](https://github.com/mewisme/mewsenger/commit/248a463))
+- **accounts:** discard unsigned tabs and lift the account limit ([74f7428](https://github.com/mewisme/mewsenger/commit/74f7428))
+
+### Bug fixes
+
+- **cargo:** drop the homepage that repeats the repository ([94abb68](https://github.com/mewisme/mewsenger/commit/94abb68))
+- **tabs:** ignore a click on the tab already shown ([a2d7d55](https://github.com/mewisme/mewsenger/commit/a2d7d55))
+- **theme:** set the preferred color scheme on every webview ([e34f5d0](https://github.com/mewisme/mewsenger/commit/e34f5d0))
+
+### Refactoring
+
+- **tray:** keep open, accounts, settings and quit ([848b7e4](https://github.com/mewisme/mewsenger/commit/848b7e4))
+
+### Documentation
+
+- **readme:** rewrite for the current app ([915294c](https://github.com/mewisme/mewsenger/commit/915294c))
+
+### Maintenance
+
+- **release:** generate the changelog from commits at release ([c43b011](https://github.com/mewisme/mewsenger/commit/c43b011))
+- **repo:** add package, bundle and issue template metadata ([54070c1](https://github.com/mewisme/mewsenger/commit/54070c1))
+- **permissions:** drop files of removed commands ([128e5ab](https://github.com/mewisme/mewsenger/commit/128e5ab))
+- **rust:** apply cargo fmt ([8761425](https://github.com/mewisme/mewsenger/commit/8761425))
+
 ## [0.2.0](https://github.com/mewisme/mewsenger/compare/v0.1.14...v0.2.0) - 2026-11-22
 
 ### Features
