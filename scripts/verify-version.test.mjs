@@ -2,7 +2,6 @@ import { expect, test } from "vitest";
 import {
   readRustPackageVersion,
   readLockedPackageVersion,
-  setRustPackageVersion,
   verifyVersions,
   verifyRepository,
 } from "./verify-version.mjs";
@@ -11,11 +10,8 @@ test("installed application metadata is consistent", () => {
   expect(verifyRepository()).toMatch(/^\d+\.\d+\.\d+$/);
 });
 
-test("Rust manifest replacement only changes the application package version", () => {
+test("the Rust package version ignores dependency versions", () => {
   const source = '[package]\nname = "mewsenger"\nversion = "0.1.1"\n\n[dependencies]\ntauri = { version = "2.12.5" }\n';
-  const updated = setRustPackageVersion(source, "0.1.14");
-  expect(readRustPackageVersion(updated)).toBe("0.1.14");
-  expect(updated).toContain('tauri = { version = "2.12.5" }');
   expect(readRustPackageVersion(source)).toBe("0.1.1");
 });
 

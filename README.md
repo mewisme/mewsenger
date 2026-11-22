@@ -102,8 +102,8 @@ CI runs the same on Windows and macOS for every push and pull request. Interacti
 
 ### Releasing
 
-1. Bump the version everywhere (`pnpm app-upver`, or by hand in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`) and run `pnpm version:check`.
-2. Push a tag `vX.Y.Z`. The *Release desktop* workflow builds the signed installers, `latest.json` and the portable executable into a **draft** release.
+1. Bump the version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` (then `cargo metadata` refreshes `Cargo.lock`) and run `pnpm version:check`.
+2. Push a tag `vX.Y.Z`. The *Release desktop* workflow builds the signed installers, `latest.json` and the portable executable into a **draft** release whose notes come from the commits since the previous tag (`scripts/changelog.mjs`), and refreshes `CHANGELOG.md` on `main`.
 3. Publish the draft. Installed apps see it through `releases/latest/download/latest.json`.
 
 The updater public key is in `src-tauri/tauri.release.conf.json`. The private key is the repository secret `TAURI_SIGNING_PRIVATE_KEY`. Rotating it means a manual reinstall for existing users.

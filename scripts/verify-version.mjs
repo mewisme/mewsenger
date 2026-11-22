@@ -10,16 +10,6 @@ export function readRustPackageVersion(manifest) {
   return version;
 }
 
-export function setRustPackageVersion(manifest, version) {
-  const section = manifest.match(/^\[package\]\s*\r?\n([\s\S]*?)(?=^\[|$(?![\s\S]))/m);
-  if (!section || !/^version\s*=\s*"[^"]+"/m.test(section[1])) {
-    throw new Error("Rust package version is missing");
-  }
-  return manifest.replace(section[0], section[0].replace(
-    /^version\s*=\s*"[^"]+"/m, `version = "${version}"`,
-  ));
-}
-
 export function readLockedPackageVersion(lockfile) {
   const found = [...lockfile.matchAll(/^\[\[package\]\]\s*\r?\nname\s*=\s*"mewsenger"\s*\r?\nversion\s*=\s*"([^"]+)"/gm)];
   if (found.length !== 1) throw new Error("Cargo lockfile app entry is missing or duplicated");
