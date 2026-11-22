@@ -2,6 +2,23 @@
 
 Generated from the commit history by pnpm changelog when a release is prepared.
 
+## [0.2.2](https://github.com/mewisme/mewsenger/compare/v0.2.1...v0.2.2) - 2026-11-22
+
+### Features
+
+- **chat:** focus the message box when a chat is clicked ([aec3944](https://github.com/mewisme/mewsenger/commit/aec3944))
+
+### Bug fixes
+
+- **chat:** focus the message box on the first click too ([3b7d746](https://github.com/mewisme/mewsenger/commit/3b7d746))
+- **badge:** use a clearer 5x7 digit font on a larger disc ([bfbeba2](https://github.com/mewisme/mewsenger/commit/bfbeba2))
+- **release:** repair the changelog header string ([f6e67db](https://github.com/mewisme/mewsenger/commit/f6e67db))
+- **badge:** draw a smaller taskbar badge with smooth edges ([6b28fac](https://github.com/mewisme/mewsenger/commit/6b28fac))
+
+### Maintenance
+
+- **release:** write the changelog before tagging, not from CI ([c0e76f7](https://github.com/mewisme/mewsenger/commit/c0e76f7))
+
 ## [0.2.1](https://github.com/mewisme/mewsenger/compare/v0.2.0...v0.2.1) - 2026-11-22
 
 ### Features
