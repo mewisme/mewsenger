@@ -84,9 +84,9 @@ test("arrow keys move the focus around the rows", async () => {
   expect(document.activeElement).toBe(rows[1]);
 });
 
-test("a closed account is named as Messenger names it, or prompts for sign-in, and the new-account row has no icon", async () => {
+test("a closed account is named as Messenger names it, or Anonymous, and the new-account row has no icon", async () => {
   render(<TabMenu view={{ accounts: [{ id: "a2", name: "Work" }, { id: "a3", name: "" }], next: 4 }} />);
   expect(screen.getByRole("menuitem", { name: /Work/ })).toBeTruthy();
-  expect(screen.getByRole("menuitem", { name: /^\S?\s?Sign in$/ })).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: /^\S?\s?Anonymous$/ })).toBeTruthy();
   expect(screen.getByRole("menuitem", { name: "Sign in to a new account" }).querySelector("svg")).toBeNull();
 });

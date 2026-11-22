@@ -1,11 +1,12 @@
 import { User } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import type { Translate } from "@/i18n";
 import type { AccountRef } from "@/ui/local-view";
 
-/** What a tab or menu row calls an account: Messenger's name for the user, or a prompt until they are signed in. */
-export function accountLabel(account: AccountRef): string {
-  return account.name.trim() || "Sign in";
+/** What a tab or menu row calls an account: Messenger's name for the user, or "Anonymous" until they are signed in. */
+export function accountLabel(account: AccountRef, t: Translate): string {
+  return account.name.trim() || t("account.anonymous");
 }
 
 /** The signed-in user's picture; their initial, or a plain person, until it is known. */

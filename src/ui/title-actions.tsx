@@ -3,8 +3,9 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Download, RefreshCcw, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import {
-  downloadTooltip, updateActionable, updateTooltip, type DownloadStatus,
+  downloadTooltip, updateActionable, updateOffered, updateTooltip, type DownloadStatus,
 } from "@/ui/status-types";
 import { useUpdate } from "@/ui/use-update";
 
@@ -13,6 +14,7 @@ import { useUpdate } from "@/ui/use-update";
  * bar is too short for Radix tooltips, so hints use the native `title`.
  */
 export function TitleActions() {
+  const t = useT();
   const native = isTauri();
   const { update, act } = useUpdate();
   const [download, setDownload] = useState<DownloadStatus | null>(null);
@@ -41,25 +43,25 @@ export function TitleActions() {
   };
 
   return (
-    <div aria-label="Application actions" role="group" className="flex h-full shrink-0 items-center gap-1 px-1">
+    <div aria-label={t("titlebar.actions")} role="group" className="flex h-full shrink-0 items-center gap-1 px-1">
       {download && (
         <Button variant="ghost" size="icon-sm" type="button"
           disabled={download.state !== "done"}
           onClick={download.state === "done" ? reveal : undefined}
-          aria-label="Download status" title={downloadTooltip(download)}>
+          aria-label={t("titlebar.downloadStatus")} title={downloadTooltip(download, t)}>
           <Download aria-hidden="true" />
         </Button>
       )}
-      {update.state !== "unconfigured" && (
+      {updateOffered(update) && (
         <Button variant="ghost" size="icon-sm" type="button"
           disabled={!native || !updateActionable(update)}
           onClick={native ? act : undefined}
-          aria-label="Updates" title={updateTooltip(update)}>
+          aria-label={t("titlebar.updates")} title={updateTooltip(update, t)}>
           <RefreshCcw aria-hidden="true" />
         </Button>
       )}
       <Button variant="ghost" size="icon-sm" type="button"
-        onClick={showSettings} aria-label="Settings" title="Settings">
+        onClick={showSettings} aria-label={t("titlebar.settings")} title={t("titlebar.settings")}>
         <Settings aria-hidden="true" />
       </Button>
     </div>

@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useT } from "@/i18n";
 import { AccountAvatar, accountLabel } from "@/ui/account-avatar";
 import type { AccountRef, TabsView } from "@/ui/local-view";
 
@@ -87,6 +88,7 @@ function translation(index: number, drag: DragView | null): string | undefined {
 
 /** Browser-style tab strip: one tab per open account plus the new-tab button. */
 export function AccountTabs({ initial }: { initial: TabsView }) {
+  const t = useT();
   const [view, setView] = useState<TabsView>(initial);
   const [order, setOrder] = useState<string[] | null>(null);
   const [dragView, setDragView] = useState<DragView | null>(null);
@@ -269,7 +271,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
       className="h-full min-w-0 items-end gap-0.5 pl-1 data-horizontal:flex-row"
     >
       <TabsList
-        aria-label="Accounts"
+        aria-label={t("tabs.label")}
         className="h-9 w-auto min-w-0 items-end justify-start gap-0.5 rounded-none bg-transparent p-0"
       >
         {tabs.map((account, index) => {
@@ -304,8 +306,8 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
             >
               <TabsTrigger
                 value={account.id}
-                aria-label={alert ? `${accountLabel(account)}: new message` : accountLabel(account)}
-                title={alert ? `${alert.title}: ${alert.body}` : accountLabel(account)}
+                aria-label={alert ? t("tabs.newMessage", { name: accountLabel(account, t) }) : accountLabel(account, t)}
+                title={alert ? `${alert.title}: ${alert.body}` : accountLabel(account, t)}
                 onMouseDown={onMouseDown}
                 onClick={() => select(account.id, true)}
                 onAuxClick={(event) => {
@@ -327,19 +329,19 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
                   className={cn("size-5", alert && "animate-pulse ring-2 ring-primary")} />
                 {alert ? (
                   <span className="tab-alert relative h-5 min-w-0 flex-1 overflow-hidden text-left">
-                    <span className="tab-alert-name">{accountLabel(account)}</span>
+                    <span className="tab-alert-name">{accountLabel(account, t)}</span>
                     <span className="tab-alert-message font-medium text-foreground">{alert.title}: {alert.body}</span>
                   </span>
                 ) : (
                   <span className={cn("min-w-0 flex-1 truncate text-left", !account.name.trim() && "text-muted-foreground")}>
-                    {accountLabel(account)}
+                    {accountLabel(account, t)}
                   </span>
                 )}
               </TabsTrigger>
               {closable && (
                 <button
                   type="button"
-                  aria-label={`Close tab ${accountLabel(account)}`}
+                  aria-label={t("tabs.closeTab", { name: accountLabel(account, t) })}
                   tabIndex={selected ? 0 : -1}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -363,9 +365,9 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
       <button
         ref={plus}
         type="button"
-        aria-label="New tab"
+        aria-label={t("tabs.newTab")}
         aria-haspopup="menu"
-        title="New tab"
+        title={t("tabs.newTab")}
         onClick={openMenu}
         className="mb-1.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >

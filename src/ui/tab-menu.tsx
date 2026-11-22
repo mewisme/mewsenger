@@ -7,6 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useT } from "@/i18n";
 import { AccountAvatar, accountLabel } from "@/ui/account-avatar";
 import type { AccountRef, TabMenuView } from "@/ui/local-view";
 
@@ -25,6 +26,7 @@ const ITEM = "h-8 gap-2 px-2 text-xs";
  * open here and closing it closes that webview.
  */
 export function TabMenu({ view }: { view: TabMenuView }) {
+  const t = useT();
   // The address carries the names; the pictures come from the app.
   const [accounts, setAccounts] = useState<AccountRef[]>(view.accounts);
   useEffect(() => {
@@ -74,19 +76,19 @@ export function TabMenu({ view }: { view: TabMenuView }) {
     <DropdownMenu open modal={false} onOpenChange={(open) => { if (!open) void close(); }}>
       <DropdownMenuTrigger aria-hidden="true" tabIndex={-1}
         className="fixed top-0 left-0 h-0 w-full opacity-0" />
-      <DropdownMenuContent aria-label="Accounts" loop sideOffset={0} avoidCollisions={false}
+      <DropdownMenuContent aria-label={t("tabs.label")} loop sideOffset={0} avoidCollisions={false}
         className="w-(--radix-dropdown-menu-trigger-width) animate-none">
         {accounts.map((account) => (
           <DropdownMenuItem key={account.id} className={ITEM}
             onSelect={(event) => { event.preventDefault(); finish("open_account", { id: account.id }); }}>
             <AccountAvatar account={account} />
-            <span className="min-w-0 flex-1 truncate">{accountLabel(account)}</span>
+            <span className="min-w-0 flex-1 truncate">{accountLabel(account, t)}</span>
           </DropdownMenuItem>
         ))}
         {accounts.length > 0 && <DropdownMenuSeparator />}
         <DropdownMenuItem className={ITEM}
           onSelect={(event) => { event.preventDefault(); finish("add_account", { name: `Account ${view.next}` }); }}>
-          <span className="min-w-0 flex-1 truncate">Sign in to a new account</span>
+          <span className="min-w-0 flex-1 truncate">{t("tabs.signInNew")}</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

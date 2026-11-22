@@ -1,4 +1,4 @@
-# Messenger
+# Mewsenger
 
 A desktop application wrapper for Facebook Messenger built with Tauri.
 
@@ -10,7 +10,7 @@ Mewsenger is a native desktop application that wraps the Messenger web interface
 
 The main native window contains separate WebViews: a **custom 40px title bar at the top** with the account tabs, Settings, update and download buttons and Minimize / Maximize / Restore / Close controls, and one Messenger page (`https://www.messenger.com`) per open tab below it. The title bar loads a local React/shadcn component from its own app URL. Messenger is not embedded in an iframe or proxied through the local frontend. Only the main window is frameless; call popups and the Settings window keep native window chrome. If the title bar fails, native decorations are restored.
 
-The title bar keeps a download indicator and an update button when relevant, and a Settings button. Settings also shows the bundled Mewsenger icon, the installed version and credits. The custom title bar also uses the icon from `src-tauri/icons/`. The app follows the system light/dark appearance.
+The title bar keeps a download indicator, an update button while an update is available and a Settings button that toggles Settings open and closed. Settings has General, Accounts, Privacy, Notifications, Updates and About tabs; About shows the icon, version, credits and links to the project's GitHub pages. The custom title bar also uses the icon from `src-tauri/icons/`. The interface is available in English and Vietnamese (System follows the Windows language, anything else falls back to English) and follows the system light/dark appearance unless a theme is chosen in Settings; the choice reaches the Messenger pages too.
 
 The unread badge is updated only from recognized Messenger unread markers; missing markers remain unknown rather than being reported as zero. The update button appears only when a signed update source is built in. A download indicator appears after a file download starts and, once finished, reveals the file in Explorer. The version, credits and the test-notification button live in **Settings**.
 
@@ -30,16 +30,16 @@ Tauri's native multi-WebView support requires the Rust `unstable` feature on des
 - **Photo viewer:** Ctrl + mouse wheel (trackpad pinch in WebView2) to zoom, double-click a photo to toggle zoom, then scroll or drag the enlarged photo. Zoom resets when the viewer/photo changes.
 - **Chats:** Ctrl+K focuses Messenger search; Ctrl+Shift+N opens Messenger's new-message control if present; Ctrl+Alt+Up/Down moves between chats when not editing text. Ctrl+1 to Ctrl+9 opens the Nth chat in the list; Ctrl+Shift+] / Ctrl+Shift+[ move to the next / previous chat. These are ignored while another text field has focus. On macOS, use Command in place of Ctrl.
 - **Account:** use **Account menu** or **Sign out** from the native tray menu. These actions use Messenger's own controls and may be unavailable when Messenger changes its page layout.
-- **Window:** drag the custom top bar to move the main window, or double-click it to maximize/restore. The window buttons minimize, maximize/restore, and close. Closing the main window hides it to the system tray when available. Double-click the tray icon, or select **Show Messenger**, to restore it. Select **Quit** to exit the process. If the tray is unavailable, closing the window exits normally.
+- **Window:** drag the custom top bar to move the main window, or double-click it to maximize/restore. The window buttons minimize, maximize/restore, and close. Closing the main window quits the app unless **Close button hides to tray** is on in Settings; then it hides to the system tray when available. Double-click the tray icon, or select **Show Messenger**, to restore it. Select **Quit** to exit the process. If the tray is unavailable, closing the window always exits.
 - **Navigation:** the tray menu provides Back, Forward, Reload and photo zoom controls. External links open in the default browser without Facebook fbclid tracking.
 
 Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, not on Facebook login pages or other origins.
 
 ## Multiple accounts
 
-Run up to four Messenger accounts at once.
+Run as many signed-in Messenger accounts at once as you like.
 
-- **Tabs:** accounts are browser-style tabs in the title bar, named after the account. Click a tab to switch, the x to close it (the account, its login and its data stay), and + to open a closed account or sign in to a new one. Drag a tab to reorder. Ctrl+T opens the account menu, Ctrl+W closes the current tab, Ctrl+Tab / Ctrl+Shift+Tab switch tabs (these also work while Messenger has focus). The last tab cannot be closed. Open tabs keep running, so notifications still arrive for accounts that are not on screen; a closed tab stops running. Open tabs and the tab you used last are restored on the next start.
+- **Tabs:** accounts are browser-style tabs in the title bar, named after the signed-in user (with their picture). Click a tab to switch, the x to close it (a signed-in account, its login and its data stay; a tab that never signed in is deleted with its profile), and + to open a closed account or sign in to a new one. Clicking a tab while Settings is open over the page closes Settings. Drag a tab to reorder. Ctrl+T opens the account menu, Ctrl+W closes the current tab, Ctrl+Tab / Ctrl+Shift+Tab switch tabs (these also work while Messenger has focus). The last tab cannot be closed. Open tabs keep running, so notifications still arrive for accounts that are not on screen; a closed tab stops running. Open tabs and the tab you used last are restored on the next start.
 - **Settings:** open in their own window or over the main window's page (Settings > Open settings; applies the next time they open). Removing an account in Settings is the only way to delete its data.
 - **Data:** the first account keeps the existing login. Others store their profile in `accounts/<id>` under the app's local data folder; removing an account deletes it.
 - **Notifications:** toasts, unread counts and the tray tooltip are tracked per account; the badge and tooltip show the total.
@@ -57,9 +57,9 @@ Run up to four Messenger accounts at once.
 
 ## Settings, startup and updates
 
-- **Settings** opens from the tray menu (**Settings…**) or the gear in the title bar. It holds the message-preview switch (shared with the tray check item), **Launch Mewsenger when I sign in to Windows**, the update control and **Copy diagnostics**. Preferences are stored in `preferences.json` in the app config directory; launch at login is read from and written to the operating system, never stored by the app.
+- **Settings** opens from the tray menu (**Settings…**) or the gear in the title bar. It holds language and theme, **Close button hides to tray**, the message-preview switch (shared with the tray check item), **Launch Mewsenger when I sign in to Windows**, the privacy and chat switches, the accounts list (the signed-in name and picture, or *Anonymous*), the update controls and **Copy diagnostics**. Preferences are stored in `preferences.json` in the app config directory; launch at login is read from and written to the operating system, never stored by the app.
 - **Launch at login** is off by default. When enabled the app starts with `--minimized`: the window stays hidden and the tray icon is used (if the tray is unavailable the window is shown so the app is never invisible). A second launch does not start another copy; it shows the running window.
-- **Updates:** Settings shows *Updates are not configured* until a signed update source is built in. Release builds merge `src-tauri/tauri.release.conf.json`, which holds the public key and the `latest.json` endpoint on GitHub Releases. The portable executable cannot replace itself, so its update action opens the releases page instead. The status bar never shows a download percentage because none is available.
+- **Updates:** Settings shows *Updates are not configured* until a signed update source is built in. Release builds merge `src-tauri/tauri.release.conf.json`, which holds the public key and the `latest.json` endpoint on GitHub Releases. The portable executable cannot replace itself, so its update action opens the releases page instead. The Updates tab can check on startup and on a schedule (every hour, 6 or 12 hours, daily, weekly, monthly, even days or odd days of the month, in UTC) and can install an update automatically; installing restarts the app. A portable build only checks, and never installs by itself.
 - **Diagnostics** copy only versions (app, Tauri, WebView2), OS and architecture, update state, whether the session and unread count are known. No paths, URLs, messages or account data.
 
 ## Portable and release builds
@@ -73,7 +73,7 @@ Run up to four Messenger accounts at once.
 - **No download percentage.** Tauri reports only that a download started and finished; the title bar button shows the file name and a final state.
 - **Toast removal** works only for toasts created by this app through Windows' own notification API. Toasts shown by the plugin fallback cannot be removed individually. Quick reply from a toast is implemented but disabled until it has been verified against a live session.
 - **Hide typing indicator, conversation preloading, Messenger preferences and call permissions** depend on probes of a live session. All rows are currently `untested`, so none of these features exist yet.
-- The app's own windows follow the operating system theme; whether Messenger's page follows it is untested, and the app has no separate theme switch.
+- Tray menu and native notification text are English only; the language setting covers the app's own windows.
 
 ## Prerequisites
 

@@ -162,9 +162,9 @@ test("the tab-shortcut event opens the dropdown like the plus button", async () 
   expect(runtime.invoke).not.toHaveBeenCalled();
 });
 
-test("a tab shows Messenger's name and picture, and only a prompt until the account is signed in", async () => {
+test("a tab shows Messenger's name and picture, and only Anonymous until the account is signed in", async () => {
   render(<AccountTabs initial={{ ...VIEW, accounts: [{ id: "a1", name: "" }, { id: "a2", name: "Work" }, { id: "a3", name: "Spare" }] }} />);
-  expect(screen.getByRole("tab", { name: "Sign in" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Anonymous" })).toBeTruthy();
   const changed = runtime.listen.mock.calls.find(([name]) => name === "accounts-changed")![1] as
     (event: { payload: unknown }) => void;
   act(() => changed({
@@ -179,7 +179,7 @@ test("a tab shows Messenger's name and picture, and only a prompt until the acco
     },
   }));
   expect(await screen.findByRole("tab", { name: "Ada Lovelace" })).toBeTruthy();
-  expect(screen.queryByRole("tab", { name: "Sign in" })).toBeNull();
+  expect(screen.queryByRole("tab", { name: "Anonymous" })).toBeNull();
   expect(screen.getByRole("tab", { name: "Work" })).toBeTruthy();
 });
 

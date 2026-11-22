@@ -66,19 +66,21 @@ test("an unknown webview label falls back to the title bar; version lives in Set
 
 test("the settings window reads the installed version and has no close button of its own", async () => {
   runtime.view = "settings";
+  const user = userEvent.setup();
   render(<DesktopApp />);
+  await user.click(await screen.findByRole("tab", { name: "About" }));
   expect(await screen.findByText(/Version 2\.3\.4/)).toBeTruthy();
   expect(screen.queryByRole("banner")).toBeNull();
   expect(screen.queryByRole("button", { name: "Close settings" })).toBeNull();
 });
 
-test("settings drawn over the page can close themselves", async () => {
+test("settings drawn over the page have no close button; the gear toggles them", async () => {
   runtime.view = "settings";
   window.history.pushState({}, "", "/?view=settings&overlay=1");
-  const user = userEvent.setup();
   render(<DesktopApp />);
-  await user.click(await screen.findByRole("button", { name: "Close settings" }));
-  expect(runtime.invoke).toHaveBeenCalledWith("close_settings");
+  expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /close/i })).toBeNull();
+  expect(runtime.invoke).not.toHaveBeenCalledWith("close_settings");
 });
 
 test("does not invent data outside the Tauri runtime", () => {
@@ -95,7 +97,7 @@ test("title bar without parameters still renders one tab and the window controls
   render(<DesktopApp />);
   expect(screen.getByRole("banner", { name: "Window title bar" })).toBeTruthy();
   expect(screen.getByRole("navigation", { name: "Window controls" })).toBeTruthy();
-  expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"))).toEqual(["Sign in"]);
+  expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"))).toEqual(["Anonymous"]);
   expect(screen.queryByRole("button", { name: /^Close tab/ })).toBeNull();
   expect(runtime.invoke).not.toHaveBeenCalledWith("open_account", expect.anything());
 });

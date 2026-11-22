@@ -95,6 +95,7 @@ test("minimize, restore and close call only native window actions", async () => 
   await user.click(screen.getByRole("button", { name: "Maximize window" }));
   expect(runtime.maximize).toHaveBeenCalledOnce();
   expect(await screen.findByRole("button", { name: "Restore window" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Restore window" }).querySelector("svg")!.getAttribute("class")).toContain("-scale-x-100");
   await user.click(screen.getByRole("button", { name: "Restore window" }));
   expect(runtime.unmaximize).toHaveBeenCalledOnce();
   expect(await screen.findByRole("button", { name: "Maximize window" })).toBeTruthy();
@@ -152,18 +153,18 @@ test("action buttons sit before the window controls", () => {
   expect(settings.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-test("Updates is hidden until configured, then follows the state and runs check and install", async () => {
+test("Updates appears only when one can be installed and installing is its only action", async () => {
   const user = userEvent.setup();
   render(<TitleBar />);
   await waitFor(() => expect(runtime.invoke).toHaveBeenCalledWith("get_update_state"));
   expect(screen.queryByRole("button", { name: "Updates" })).toBeNull();
 
-  await emit("update-status", { state: "idle" });
-  const button = () => screen.getByRole("button", { name: "Updates" }) as HTMLButtonElement;
-  expect(button().title).toBe("Check for updates");
-  await user.click(button());
-  expect(runtime.invoke).toHaveBeenCalledWith("check_update");
+  for (const state of [{ state: "idle" }, { state: "checking" }, { state: "up_to_date" }]) {
+    await emit("update-status", state);
+    expect(screen.queryByRole("button", { name: "Updates" })).toBeNull();
+  }
 
+  const button = () => screen.getByRole("button", { name: "Updates" }) as HTMLButtonElement;
   await emit("update-status", { state: "available", version: "0.2.0" });
   expect(button().title).toBe("Install version 0.2.0");
   await user.click(button());
@@ -173,6 +174,7 @@ test("Updates is hidden until configured, then follows the state and runs check 
   expect(button().disabled).toBe(true);
   await emit("update-status", { state: "unconfigured" });
   expect(screen.queryByRole("button", { name: "Updates" })).toBeNull();
+  expect(runtime.invoke).not.toHaveBeenCalledWith("check_update");
 });
 
 test("Updates is not shown in the browser even if the backend state says otherwise", () => {

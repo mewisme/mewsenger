@@ -1,17 +1,26 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AppWindow, PanelTop, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { Separator } from "@/components/ui/separator";
+import { useT } from "@/i18n";
+import { AccountAvatar, accountLabel } from "@/ui/account-avatar";
+import { SwitchRow } from "@/ui/setting-row";
 
 export interface AccountInfo {
   id: string;
+  /** Internal fallback name; never shown as the label. */
   name: string;
+  /** Messenger's name for the user, once signed in. */
+  display_name?: string;
+  /** Their picture as a data URL, once signed in. */
+  picture?: string;
 }
 
 export type SettingsPlacement = "window" | "overlay";
@@ -24,7 +33,6 @@ export interface AccountsConfig {
   accounts: AccountInfo[];
 }
 
-export const MAX_ACCOUNTS = 4;
 const FIRST_ACCOUNT = "a1";
 
 function isConfig(value: unknown): value is AccountsConfig {
@@ -32,38 +40,12 @@ function isConfig(value: unknown): value is AccountsConfig {
     Array.isArray((value as AccountsConfig).accounts);
 }
 
-function Choice({ icon, label, hint, checked, disabled, onSelect }: {
-  icon: ReactNode;
-  label: string;
-  hint: string;
-  checked: boolean;
-  disabled?: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={onSelect}
-      className={cn(
-        "flex min-w-0 flex-1 flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        checked ? "border-primary bg-primary/10" : "border-border hover:bg-muted",
-      )}
-    >
-      <span aria-hidden="true" className="text-muted-foreground">{icon}</span>
-      <span className="text-sm font-medium">{label}</span>
-      <span className="text-xs text-muted-foreground">{hint}</span>
-    </button>
-  );
-}
+const asRef = (account: AccountInfo) =>
+  ({ id: account.id, name: account.display_name?.trim() ?? "", picture: account.picture });
 
 export function AccountsSection() {
+  const t = useT();
   const [config, setConfig] = useState<AccountsConfig | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<AccountInfo | null>(null);
 
@@ -80,13 +62,14 @@ export function AccountsSection() {
       .then((value) => {
         if (!active) return;
         if (isConfig(value)) setConfig(value);
-        else setMessage("Could not load accounts");
+        else setMessage(t("accounts.loadFailed"));
       })
-      .catch(() => { if (active) setMessage("Could not load accounts"); });
+      .catch(() => { if (active) setMessage(t("accounts.loadFailed")); });
     return () => {
       active = false;
       detach?.();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function run(command: string, args: Record<string, unknown>, failure: string) {
@@ -96,125 +79,86 @@ export function AccountsSection() {
       .catch(() => setMessage(failure));
   }
 
-  if (config === null) {
-    return (
-      <section aria-labelledby="settings-accounts">
-        <h2 id="settings-accounts" className="text-sm font-semibold">Accounts</h2>
-        {message && <p role="status" className="text-xs text-muted-foreground">{message}</p>}
-      </section>
-    );
-  }
-
-  const count = config.accounts.length;
-  const draftOf = (account: AccountInfo) => drafts[account.id] ?? account.name;
-
-  function commitRename(account: AccountInfo) {
-    const name = draftOf(account).trim();
-    setDrafts(({ [account.id]: _discarded, ...rest }) => rest);
-    if (name === "" || name === account.name) return;
-    run("rename_account", { id: account.id, name }, "Could not rename account");
-  }
+  const removalLabel = pendingRemoval ? accountLabel(asRef(pendingRemoval), t) : "";
 
   return (
     <>
-      <section aria-labelledby="settings-accounts" className="flex flex-col gap-2">
-        <div className="flex items-baseline justify-between gap-4">
-          <h2 id="settings-accounts" className="text-sm font-semibold">Accounts</h2>
-          <span className="text-xs text-muted-foreground">{count} of {MAX_ACCOUNTS}</span>
-        </div>
-        <ul className="flex flex-col gap-2">
-          {config.accounts.map((account) => (
-            <li key={account.id}
-              className="flex items-center gap-3 rounded-lg border border-border bg-card/40 p-2">
-              <span aria-hidden="true"
-                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold uppercase text-primary">
-                {(draftOf(account).trim()[0] ?? "?")}
-              </span>
-              <input
-                type="text"
-                aria-label={`Name of ${account.name}`}
-                value={draftOf(account)}
-                maxLength={24}
-                onChange={(event) => setDrafts({ ...drafts, [account.id]: event.target.value })}
-                onBlur={() => commitRename(account)}
-                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-                className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 text-sm hover:border-input focus:border-input focus:outline-none"
-              />
-              {account.id === config.active
-                ? <Badge variant="secondary">Showing</Badge>
-                : config.open.includes(account.id) && <Badge variant="outline">Open</Badge>}
-              <Button type="button" variant="secondary" size="sm"
-                aria-label={`Open ${account.name}`}
-                disabled={account.id === config.active}
-                onClick={() => {
-                  setMessage(null);
-                  invoke("open_account", { id: account.id })
-                    .catch(() => setMessage("Could not open account"));
-                }}>
-                {config.open.includes(account.id) ? "Switch" : "Open tab"}
-              </Button>
-              <Button type="button" variant="ghost" size="icon-sm"
-                aria-label={`Remove ${account.name}`}
-                title={account.id === FIRST_ACCOUNT ? "The first account cannot be removed" : "Remove"}
-                disabled={account.id === FIRST_ACCOUNT}
-                className="text-destructive hover:text-destructive"
-                onClick={() => setPendingRemoval(account)}>
-                <Trash2 aria-hidden="true" />
-              </Button>
-            </li>
-          ))}
-        </ul>
-        <Button type="button" variant="outline" size="sm"
-          disabled={count >= MAX_ACCOUNTS}
-          className="border-dashed"
-          onClick={() => run("add_account", { name: `Account ${config.next_id}` }, "Could not add account")}>
-          <Plus aria-hidden="true" />
-          Add account
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          {count >= MAX_ACCOUNTS ? `Up to ${MAX_ACCOUNTS} accounts.` : "Each account keeps its own login."}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Open tabs and the account you used last are restored when Messenger starts.
-        </p>
-      </section>
-
-      <section aria-labelledby="settings-placement" className="flex flex-col gap-2">
-        <h2 id="settings-placement" className="text-sm font-semibold">Open settings</h2>
-        <div role="radiogroup" aria-labelledby="settings-placement" className="flex gap-2">
-          <Choice icon={<AppWindow className="size-4" />} label="In a window"
-            hint="Its own window"
-            checked={config.settings === "window"}
-            onSelect={() => run("set_settings_placement", { placement: "window" }, "Could not change where settings open")} />
-          <Choice icon={<PanelTop className="size-4" />} label="Over the page"
-            hint="On top of the main window"
-            checked={config.settings === "overlay"}
-            onSelect={() => run("set_settings_placement", { placement: "overlay" }, "Could not change where settings open")} />
-        </div>
-        <p className="text-xs text-muted-foreground">Applies the next time settings open.</p>
-      </section>
-
-      {message && <p role="alert" className="text-xs text-destructive">{message}</p>}
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("accounts.title")}</CardTitle>
+          <CardDescription>{t("accounts.hint")}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {config && (
+            <ul className="flex flex-col gap-2">
+              {config.accounts.map((account) => {
+                const label = accountLabel(asRef(account), t);
+                const isOpen = config.open.includes(account.id);
+                return (
+                  <li key={account.id}
+                    className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-2">
+                    <AccountAvatar account={asRef(account)} className="size-8" />
+                    <span className={`min-w-0 flex-1 truncate text-sm font-medium ${asRef(account).name ? "" : "text-muted-foreground"}`}>
+                      {label}
+                    </span>
+                    {account.id === config.active
+                      ? <Badge variant="secondary">{t("accounts.showing")}</Badge>
+                      : isOpen && <Badge variant="outline">{t("accounts.open")}</Badge>}
+                    <Button type="button" variant="secondary" size="sm"
+                      aria-label={t("accounts.openLabel", { name: label })}
+                      disabled={account.id === config.active}
+                      onClick={() => {
+                        setMessage(null);
+                        invoke("open_account", { id: account.id })
+                          .catch(() => setMessage(t("accounts.openFailed")));
+                      }}>
+                      {isOpen ? t("accounts.switch") : t("accounts.openTab")}
+                    </Button>
+                    <Button type="button" variant="ghost" size="icon-sm"
+                      aria-label={t("accounts.removeLabel", { name: label })}
+                      title={account.id === FIRST_ACCOUNT ? t("accounts.firstCannotRemove") : t("accounts.remove")}
+                      disabled={account.id === FIRST_ACCOUNT}
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => setPendingRemoval(account)}>
+                      <Trash2 aria-hidden="true" />
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <Button type="button" variant="outline" size="sm" className="border-dashed"
+            disabled={config === null}
+            onClick={() => config && run("add_account", { name: `Account ${config.next_id}` }, t("accounts.addFailed"))}>
+            <Plus aria-hidden="true" />
+            {t("accounts.add")}
+          </Button>
+          <Separator />
+          <SwitchRow id="pref-overlay" label={t("accounts.overlay")} hint={t("accounts.overlayHint")}
+            checked={config?.settings === "overlay"} disabled={config === null}
+            onChange={(value) => run("set_settings_placement",
+              { placement: value ? "overlay" : "window" }, t("accounts.placementFailed"))} />
+          {message && <p role="alert" className="text-xs text-destructive">{message}</p>}
+        </CardContent>
+      </Card>
       <Dialog open={pendingRemoval !== null}
         onOpenChange={(open) => { if (!open) setPendingRemoval(null); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove {pendingRemoval?.name}?</DialogTitle>
-            <DialogDescription>
-              This signs the account out and deletes its data on this computer.
-            </DialogDescription>
+            <DialogTitle>{t("accounts.removeTitle", { name: removalLabel })}</DialogTitle>
+            <DialogDescription>{t("accounts.removeBody")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => setPendingRemoval(null)}>
-              Cancel
+              {t("accounts.cancel")}
             </Button>
             <Button type="button" variant="destructive" onClick={() => {
               if (pendingRemoval) {
-                run("remove_account", { id: pendingRemoval.id }, "Could not remove account");
+                run("remove_account", { id: pendingRemoval.id }, t("accounts.removeFailed"));
               }
               setPendingRemoval(null);
             }}>
-              Remove account
+              {t("accounts.removeConfirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

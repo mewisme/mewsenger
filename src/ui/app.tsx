@@ -8,7 +8,7 @@ import { Settings } from "@/ui/settings";
 import { TabMenu } from "@/ui/tab-menu";
 
 export function DesktopApp() {
-  const [version, setVersion] = useState("Version unavailable");
+  const [version, setVersion] = useState("");
   const search = typeof window !== "undefined" ? window.location.search : "";
   const localView = resolveLocalView(
     search,
@@ -21,7 +21,7 @@ export function DesktopApp() {
     let active = true;
     void getVersion()
       .then((value) => { if (active) setVersion(value); })
-      .catch(() => { if (active) setVersion("Version unavailable"); });
+      .catch(() => { if (active) setVersion(""); });
     return () => { active = false; };
   }, [settingsView]);
 
