@@ -2,6 +2,26 @@
   "name": "mewsenger",
   "private": true,
   "version": "0.2.0",
+  "description": "A fast, native Windows desktop client for Messenger with multiple accounts, native notifications and privacy tools.",
+  "author": "Mew",
+  "license": "MIT",
+  "homepage": "https://github.com/mewisme/mewsenger#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mewisme/mewsenger.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mewisme/mewsenger/issues"
+  },
+  "keywords": [
+    "messenger",
+    "tauri",
+    "desktop",
+    "windows",
+    "multi-account",
+    "react",
+    "rust"
+  ],
   "type": "module",
   "scripts": {
     "dev": "vite",

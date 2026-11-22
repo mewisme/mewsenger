@@ -19,6 +19,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Mew",
+    "copyright": "Copyright (c) 2024 Mew",
+    "category": "SocialNetworking",
+    "shortDescription": "Desktop client for Messenger",
+    "longDescription": "Mewsenger wraps Messenger in a native window with multiple accounts as tabs, native notifications, an unread badge, privacy tools and signed automatic updates.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
