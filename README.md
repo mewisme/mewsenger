@@ -1,204 +1,132 @@
+<div align="center">
+
+<img src="src-tauri/icons/128x128.png" alt="Mewsenger" width="96" height="96" />
+
 # Mewsenger
 
-A desktop application wrapper for Facebook Messenger built with Tauri.
+**A fast, native Windows desktop client for Messenger, with multiple accounts, native notifications and privacy tools.**
 
-## Description
+[![Release](https://img.shields.io/github/v/release/mewisme/mewsenger?label=release)](https://github.com/mewisme/mewsenger/releases/latest)
+[![Verify](https://img.shields.io/github/actions/workflow/status/mewisme/mewsenger/build.yml?branch=main&label=verify)](https://github.com/mewisme/mewsenger/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
+![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB)
 
-Mewsenger is a native desktop application that wraps the Messenger web interface (messenger.com) in a standalone window. It provides a desktop experience for Facebook Messenger with native features like notifications and clipboard management.
+[Download](https://github.com/mewisme/mewsenger/releases/latest) · [Report an issue](https://github.com/mewisme/mewsenger/issues) · [Changelog](CHANGELOG.md)
 
-## Local desktop shell
+</div>
 
-The main native window contains separate WebViews: a **custom 40px title bar at the top** with the account tabs, Settings, update and download buttons and Minimize / Maximize / Restore / Close controls, and one Messenger page (`https://www.messenger.com`) per open tab below it. The title bar loads a local React/shadcn component from its own app URL. Messenger is not embedded in an iframe or proxied through the local frontend. Only the main window is frameless; call popups and the Settings window keep native window chrome. If the title bar fails, native decorations are restored.
-
-The title bar keeps a download indicator, an update button while an update is available and a Settings button that toggles Settings open and closed. Settings has General, Accounts, Privacy, Notifications, Updates and About tabs; About shows the icon, version, credits and links to the project's GitHub pages. The custom title bar also uses the icon from `src-tauri/icons/`. The interface is available in English and Vietnamese (System follows the Windows language, anything else falls back to English) and follows the system light/dark appearance unless a theme is chosen in Settings; the choice reaches the Messenger pages too.
-
-The unread badge is updated only from recognized Messenger unread markers; missing markers remain unknown rather than being reported as zero. The update button appears only when a signed update source is built in. A download indicator appears after a file download starts and, once finished, reveals the file in Explorer. The version, credits and the test-notification button live in **Settings**.
-
-Clicking a visible native fallback toast brings Messenger to the foreground and opens its conversation only when the notification plugin supplies a still-valid matching ID and Messenger supplied a safely routable conversation ID. Unrecognized, expired, or already-read notifications only reveal Messenger. The plugin cannot guarantee activation from Windows Action Center or remove delivered Windows toast history.
-
-Tauri's native multi-WebView support requires the Rust `unstable` feature on desktop. WebViews are mounted on a worker thread to avoid Windows WebView2 deadlocks. The local `titlebar` WebView has narrowly scoped native window-control permissions; `status` has only the local status, update, download-reveal and open-Settings commands; the remote `messenger` WebView can invoke only the bounded notification command from approved Messenger HTTPS URLs. The local `settings` window holds the preference, autostart, update, test-notification and diagnostics commands.
+Mewsenger wraps the Messenger web app (`messenger.com`) in a small native shell built with [Tauri 2](https://tauri.app). It adds what the browser tab lacks: accounts as tabs, real Windows notifications, an unread badge, keyboard shortcuts and a handful of privacy switches. It talks to Messenger only through the page itself. There is no proxy, no extra server and no private API.
 
 ## Features
 
-- Native desktop application for Windows, macOS, and Linux
-- System notifications support
-- Clipboard manager integration
-- Window positioning and management
+**Accounts**
+- As many signed-in accounts as you want, each as a browser-style tab with its own isolated login.
+- Tabs show the account's Messenger name and picture. Drag to reorder, close with the x or `Ctrl+W`.
+- A tab that never signed in is deleted, profile included, when you close it.
+- A tab strip that shrinks to icons and never hides the **+** button.
 
-## Desktop controls
+**Notifications**
+- Native Windows toasts and in-app tab alerts. The message preview can be turned off.
+- Unread chat count on the taskbar icon and the tray tooltip, per account and in total.
+- Clicking a toast opens that conversation. Reading it elsewhere clears the toast.
 
-- **Photo viewer:** Ctrl + mouse wheel (trackpad pinch in WebView2) to zoom, double-click a photo to toggle zoom, then scroll or drag the enlarged photo. Zoom resets when the viewer/photo changes.
-- **Chats:** Ctrl+K focuses Messenger search; Ctrl+Shift+N opens Messenger's new-message control if present; Ctrl+Alt+Up/Down moves between chats when not editing text. Ctrl+1 to Ctrl+9 opens the Nth chat in the list; Ctrl+Shift+] / Ctrl+Shift+[ move to the next / previous chat. These are ignored while another text field has focus. On macOS, use Command in place of Ctrl.
-- **Account:** use **Account menu** or **Sign out** from the native tray menu. These actions use Messenger's own controls and may be unavailable when Messenger changes its page layout.
-- **Window:** drag the custom top bar to move the main window, or double-click it to maximize/restore. The window buttons minimize, maximize/restore, and close. Closing the main window quits the app unless **Close button hides to tray** is on in Settings; then it hides to the system tray when available. Double-click the tray icon, or select **Show Messenger**, to restore it. Select **Quit** to exit the process. If the tray is unavailable, closing the window always exits.
-- **Navigation:** the tray menu provides Back, Forward, Reload and photo zoom controls. External links open in the default browser without Facebook fbclid tracking.
+**Privacy**
+- Hide that you are typing.
+- Replace pictures with initials, or cover names, messages and photos for screen sharing.
+- No telemetry. The optional diagnostics copy holds versions and states only, never paths, URLs or messages.
 
-Desktop DOM enhancements run only on HTTPS messenger.com or www.messenger.com, not on Facebook login pages or other origins.
+**Comfort**
+- Light, dark or system theme that reaches Messenger itself, in English or Vietnamese.
+- Resizable chat list and details, photo viewer zoom, spell check switch, double-click to reply, right-click menus.
+- Wide screens are filled instead of centring Messenger in a 2560 px column.
+- Idle tabs give memory back, and a stuck or sleeping page reloads itself.
+- Photo and video downloads are saved from the page, with a reveal-in-Explorer button when done.
 
-## Multiple accounts
+**Updates**
+- Signed updates from GitHub Releases: check on start, on a schedule (hourly to monthly, even or odd days) and optionally install by themselves.
+- Portable build with no installer.
 
-Run as many signed-in Messenger accounts at once as you like.
+## Install
 
-- **Tabs:** accounts are browser-style tabs in the title bar, named after the signed-in user (with their picture). Click a tab to switch, the x to close it (a signed-in account, its login and its data stay; a tab that never signed in is deleted with its profile), and + to open a closed account or sign in to a new one. Clicking an account tab while Settings is open closes Settings. Drag a tab to reorder. Ctrl+T opens the account menu, Ctrl+W closes the current tab, Ctrl+Tab / Ctrl+Shift+Tab switch tabs (these also work while Messenger has focus). The last tab cannot be closed. Open tabs keep running, so notifications still arrive for accounts that are not on screen; a closed tab stops running. Open tabs and the tab you used last are restored on the next start.
-- **Settings:** open over the main window's page and show as a tab in the title bar; the tab's x, the gear or a click on an account tab closes them. Removing an account in Settings is the only way to delete its data.
-- **Data:** the first account keeps the existing login. Others store their profile in `accounts/<id>` under the app's local data folder; removing an account deletes it.
-- **Notifications:** toasts, unread counts and the tray tooltip are tracked per account; the badge and tooltip show the total.
-- **Costs:** every account keeps its own WebView2 process, so memory use grows with the account count. Messenger may ask for extra verification when several accounts are active (unverified).
+Download the latest build from the [Releases](https://github.com/mewisme/mewsenger/releases/latest) page:
 
-## Notifications and unread badges
+| File | Use |
+|---|---|
+| `Mewsenger_x.y.z_x64-setup.exe` | Installer (recommended, updates itself) |
+| `Mewsenger_x.y.z_x64_en-US.msi` | MSI installer |
+| `Mewsenger-windows-portable.exe` | Runs from any folder. Does not self-update |
 
-- Messenger's browser notifications remain the primary source. If WebView2 rejects a notification that Messenger already has permission to display, the app attempts to show it through the native OS notification service. It does not override a denied browser permission.
-- The fallback uses Messenger's supplied title and text. Group, sender and avatar details are only available when the website supplies them; no private Messenger API is queried.
-- Where the chat list contains explicit unread markers, the app counts distinct conversations and shows their count as a Windows taskbar overlay (or a system badge on supported platforms). It does not guess from the number shown in the page title.
-- Duplicate fallback notifications are suppressed for ten minutes when Messenger supplies a notification tag, or fifteen seconds when only text is available; at most twelve can be sent per minute. No message content or session tokens are persisted or logged.
-- The native notification plugin can identify a clicked fallback toast while it is still visible. The app associates each such toast with a bounded conversation ID, focuses Messenger and navigates to that conversation only while the mapping is valid. A mapping expires after ten minutes, is used once, and is removed when an earlier recognized unread marker disappears from the focused conversation. Fallbacks without reliable IDs only focus Messenger.
-- Toasts created by this app on Windows use the native notification API, so reading a conversation removes that conversation's delivered toasts from Action Center. Toasts that fall back to the plugin cannot be removed individually, and clicking an old Action Center entry may not activate the app at all; background delivery only works while the application process and Messenger's notification infrastructure are running.
-- Delivery depends on Messenger's notification APIs and the app process being open. Notifications are not guaranteed after quitting the app or when Messenger sends them exclusively through a Service Worker that the page cannot observe.
+Windows 10 or 11 with the WebView2 runtime (included in current Windows). The builds are not code-signed by a Windows certificate, so SmartScreen may warn on first launch. Update packages are signed with the project's updater key.
 
-## Settings, startup and updates
+## Using it
 
-- **Settings** opens from the tray menu (**Settings…**) or the gear in the title bar (it toggles the Settings tab). It holds language and theme, **Close button hides to tray**, the message-preview switch (shared with the tray check item), **Launch Mewsenger when I sign in to Windows**, the privacy and chat switches, the accounts list (the signed-in name and picture, or *Anonymous*), the update controls and **Copy diagnostics**. Preferences are stored in `preferences.json` in the app config directory; launch at login is read from and written to the operating system, never stored by the app.
-- **Launch at login** is off by default. When enabled the app starts with `--minimized`: the window stays hidden and the tray icon is used (if the tray is unavailable the window is shown so the app is never invisible). A second launch does not start another copy; it shows the running window.
-- **Updates:** Settings shows *Updates are not configured* until a signed update source is built in. Release builds merge `src-tauri/tauri.release.conf.json`, which holds the public key and the `latest.json` endpoint on GitHub Releases. The portable executable cannot replace itself, so its update action opens the releases page instead. The Updates tab can check on startup and on a schedule (every hour, 6 or 12 hours, daily, weekly, monthly, even days or odd days of the month, in UTC) and can install an update automatically; installing restarts the app. A portable build only checks, and never installs by itself.
-- **Diagnostics** copy only versions (app, Tauri, WebView2), OS and architecture, update state, whether the session and unread count are known. No paths, URLs, messages or account data.
+**Tray menu:** Open Mewsenger, Accounts, Settings, Quit. Double-click the tray icon to open the window. Closing the window quits the app unless **Close button hides to tray** is on.
 
-## Portable and release builds
+| Shortcut | Action |
+|---|---|
+| `Ctrl+K` | Search chats |
+| `Ctrl+Shift+N` | New message |
+| `Ctrl+1` ... `Ctrl+9` | Open the Nth chat |
+| `Ctrl+Alt+Up` / `Down`, `Ctrl+Shift+[` / `]` | Previous or next chat |
+| `Ctrl+T` / `Ctrl+W` | New account tab menu / close tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next or previous tab |
+| `Ctrl` + wheel, double-click | Zoom a photo in the viewer |
 
-- **Portable (Windows):** `pnpm tauri build --no-bundle -- --features portable` produces `src-tauri/target/release/mewsenger.exe`, which runs alone from any folder (WebView2 is a system component). It is unsigned, so Windows SmartScreen may warn on first launch.
-- **Release:** run `pnpm app-upver`, push the tag `vX.Y.Z`. The `Release desktop` workflow builds the signed NSIS/MSI installers, `latest.json` and the portable executable and uploads them to a **draft** release; publishing is a manual step. The public key in `tauri.release.conf.json` verifies updates; the matching private key lives outside the repo and is stored as the repository secret `TAURI_SIGNING_PRIVATE_KEY` (the key has no password, so `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` stays unset). The app checks `releases/latest/download/latest.json`, so an update is offered only after the draft release is published. To rotate the key, run `pnpm tauri signer generate -w <path>`, replace the public key and the secret; installed builds then need a manual reinstall.
+**Settings** open as a tab next to your accounts, and stay open behind other tabs until you close them. They cover language and theme, window behavior, launch at login, chat and privacy switches, accounts, notifications, updates and About.
+
+## Build from source
+
+Requirements: Node.js 24+, pnpm 12.16.1 (pinned in `package.json`), a stable Rust toolchain and the Microsoft C++ Build Tools.
+
+```shell
+git clone https://github.com/mewisme/mewsenger.git
+cd mewsenger
+pnpm install
+pnpm tauri dev          # development, local UI served on port 14871
+pnpm tauri build        # installers in src-tauri/target/release/bundle
+```
+
+The portable executable: `pnpm tauri build --no-bundle -- --features portable`.
+
+### Checks
+
+```shell
+pnpm test               # JS tests: page script (node:vm) and the React UI (jsdom)
+pnpm tsc --noEmit
+pnpm version:check      # npm, Tauri, Cargo and Cargo.lock agree
+cd src-tauri && cargo test --locked --lib && cargo fmt --check
+```
+
+CI runs the same on Windows and macOS for every push and pull request. Interactive checks (logged-in chats, notifications, the title bar) still need a real desktop; `scripts/verify-windows-shell.ps1` drives the shell through UI Automation.
+
+### Releasing
+
+1. Bump the version everywhere (`pnpm app-upver`, or by hand in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`) and run `pnpm version:check`.
+2. Push a tag `vX.Y.Z`. The *Release desktop* workflow builds the signed installers, `latest.json` and the portable executable into a **draft** release.
+3. Publish the draft. Installed apps see it through `releases/latest/download/latest.json`.
+
+The updater public key is in `src-tauri/tauri.release.conf.json`. The private key is the repository secret `TAURI_SIGNING_PRIVATE_KEY`. Rotating it means a manual reinstall for existing users.
+
+## How it works
+
+- **Shell (Rust, `src-tauri/`)**: one main window with separate WebViews: a local React title bar (tabs, Settings, update and download buttons) and one Messenger page per open tab. Each extra account has its own WebView2 profile.
+- **Page script (`src-tauri/src/inject/`)**: plain JavaScript parts joined at build time and injected into the Messenger page. They read the page's own modules and DOM for unread state, notifications, privacy features and layout. See the [README there](src-tauri/src/inject/README.md).
+- **Local UI (`src/`)**: React 19, Tailwind 4 and shadcn/ui for the title bar, tab menu and Settings, with an English and Vietnamese translation.
+- **Safety**: every local view gets only the commands it needs (`src-tauri/capabilities/`), the Messenger page can call one bounded notification command, and the origin is a single compile-time profile in `src-tauri/site.json`.
 
 ## Known limitations
 
-- **No upload progress.** WebView2 offers no official upload callback and wrapping `fetch`/`XMLHttpRequest` would touch Messenger request bodies, which the app avoids.
-- **No download percentage.** Tauri reports only that a download started and finished; the title bar button shows the file name and a final state.
-- **Toast removal** works only for toasts created by this app through Windows' own notification API. Toasts shown by the plugin fallback cannot be removed individually. Quick reply from a toast is implemented but disabled until it has been verified against a live session.
-- **Hide typing indicator, conversation preloading, Messenger preferences and call permissions** depend on probes of a live session. All rows are currently `untested`, so none of these features exist yet.
-- Tray menu and native notification text are English only; the language setting covers the app's own windows.
+- Messenger changes its page often. Features that read its internals (unread counts, typing filter, theme) fail safe and leave the page alone when a hook no longer matches, but may need an update.
+- No upload or download percentage: WebView2 gives no official callback for it.
+- The tray menu and notification text are English only.
+- Quick reply from a toast is implemented but disabled until verified against a live session.
+- Windows is the supported platform. macOS builds in CI but is untested.
 
-## Prerequisites
+## Contributing
 
-- Node.js 24 or newer
-- pnpm 12.16.1 (pinned in package.json)
-- Rust (stable toolchain)
-- Platform-specific build tools:
-  - Windows: Microsoft Visual Studio C++ Build Tools
-  - macOS: Xcode Command Line Tools
-  
-## Installation
-
-### Development Setup
-
-1. Clone the repository:
-```
-git clone https://github.com/mewisme/mewsenger.git
-cd messenger
-```
-
-2. Install dependencies:
-```
-pnpm install
-```
-
-3. Run in development mode:
-```
-pnpm tauri dev
-```
-
-### Building
-
-Build the application:
-```
-pnpm tauri build
-```
-
-The built application will be in `src-tauri/target/release/` (or `src-tauri/target/debug/` for debug builds).
-
-## Project Structure
-
-```
-messenger/
-├── src/                    # Frontend source files
-│   └── main.tsx            # Main TypeScript entry point
-├── src-tauri/             # Tauri backend (Rust)
-│   ├── src/
-│   │   ├── main.rs        # Application entry point
-│   │   └── lib.rs         # Main application logic
-│   ├── Cargo.toml         # Rust dependencies
-│   └── tauri.conf.json    # Tauri configuration
-├── package.json           # Node.js dependencies
-└── vite.config.ts         # Vite configuration
-```
-
-## Configuration
-
-The application configuration is located in `src-tauri/tauri.conf.json`. Key settings include:
-
-- Window size and minimum dimensions
-- Application identifier
-- Security policies
-
-## Development
-
-### Testing
-
-```shell
-pnpm test
-pnpm test:watch
-pnpm test:coverage
-pnpm version:check
-pnpm run build
-```
-
-Rust unit tests can be run with `cargo test --locked --lib` inside `src-tauri`. Vitest runs the desktop WebView simulation tests under Node and the local React UI component tests in jsdom. V8 coverage reports only imported local UI components; the desktop scripts use `node:vm` and are tested for behavior but cannot be measured by the Vitest V8 instrumentation. The local title and status bars run as separate children of the main native window.
-
-On Windows, build a debug executable and verify the real UI Automation controls in an interactive desktop:
-
-```powershell
-pnpm tauri build --debug --no-bundle
-pwsh -NoProfile -File ./scripts/verify-windows-shell.ps1
-```
-
-The Windows check launches an isolated Mewsenger process, verifies the custom title controls and bottom status controls, resizes the window, opens About and tests both its in-app Close button and native X, then tests maximize, restore, minimize and close-to-tray. It terminates only the process it launched. For inspection without clicking the buttons, pass `-InspectOnly`. Logged-in chat, media calls, notifications and macOS behavior still require platform-specific interactive verification.
-
-To test unsigned Windows installers without uploading or publishing them, use `pnpm tauri build --debug`. MSI and NSIS packages are written under `src-tauri/target/debug/bundle/` and must not be treated as signed production releases.
-
-GitHub Actions verifies changes on Windows Server 2025 and macOS 15 (Apple Silicon target) for pushes, pull requests, and manual runs. The workflow uses pinned pnpm and a frozen lockfile, runs JS/Rust tests, and builds without bundling or publishing. Creating a tag or release must be performed separately and deliberately; pushing to `main` no longer creates a draft release.
-
-### Running in Development Mode
-
-The local shell development server runs on port 14871 with `strictPort` enabled, avoiding conflicts with other Tauri projects using port 1420; the separate Messenger WebView always loads `https://www.messenger.com` directly. Start the server through `pnpm tauri dev`, not by launching a debug executable against an unrelated server:
-
-```
-pnpm tauri dev
-```
-
-### Building for Production
-
-Build for all platforms:
-```
-pnpm tauri build
-```
-
-Build for a specific platform:
-```
-pnpm tauri build --target x86_64-pc-windows-msvc    # Windows
-pnpm tauri build --target x86_64-apple-darwin       # macOS Intel
-pnpm tauri build --target aarch64-apple-darwin      # macOS Apple Silicon
-pnpm tauri build --target x86_64-unknown-linux-gnu # Linux
-```
-
-## Technologies
-
-- Tauri 2: Framework for building desktop applications
-- Rust: Backend language
-- TypeScript: Frontend language
-- Vite: Build tool and development server
-- pnpm: Package manager
+Issues and pull requests are welcome. Please run the checks above first, and use [Conventional Commits](https://www.conventionalcommits.org) (`feat(scope): subject`).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Author
-
-Mew
+[MIT](LICENSE) © Mew. Mewsenger is an independent project and is not affiliated with or endorsed by Meta. Messenger is a trademark of Meta Platforms, Inc.
