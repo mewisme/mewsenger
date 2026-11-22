@@ -428,7 +428,7 @@ fn reset_view_state(registry: &mut Registry, account: &str) {
 /// smooth edge and a margin, which keeps it small beside the app's icon.
 fn unread_icon(count: usize) -> tauri::image::Image<'static> {
     const SIZE: usize = 64;
-    const RADIUS: f32 = 24.0;
+    const RADIUS: f32 = 28.0;
     let mut rgba = vec![0u8; SIZE * SIZE * 4];
     for y in 0..SIZE {
         for x in 0..SIZE {
@@ -446,39 +446,63 @@ fn unread_icon(count: usize) -> tauri::image::Image<'static> {
     } else {
         count.to_string()
     };
-    let digit = |c: char| -> [u8; 7] {
+    // The classic 5x7 digits: rows of five bits, high bit on the left.
+    let glyph = |c: char| -> [u8; 7] {
         match c {
-            '0' => [7, 5, 5, 5, 5, 5, 7],
-            '1' => [2, 6, 2, 2, 2, 2, 7],
-            '2' => [7, 1, 1, 7, 4, 4, 7],
-            '3' => [7, 1, 1, 7, 1, 1, 7],
-            '4' => [5, 5, 5, 7, 1, 1, 1],
-            '5' => [7, 4, 4, 7, 1, 1, 7],
-            '6' => [7, 4, 4, 7, 5, 5, 7],
-            '7' => [7, 1, 1, 1, 1, 1, 1],
-            '8' => [7, 5, 5, 7, 5, 5, 7],
-            '9' => [7, 5, 5, 7, 1, 1, 7],
-            _ => [0, 0, 2, 7, 2, 0, 0],
+            '0' => [
+                0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+            ],
+            '1' => [
+                0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+            ],
+            '2' => [
+                0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+            ],
+            '3' => [
+                0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110,
+            ],
+            '4' => [
+                0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+            ],
+            '5' => [
+                0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+            ],
+            '6' => [
+                0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+            ],
+            '7' => [
+                0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+            ],
+            '8' => [
+                0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+            ],
+            '9' => [
+                0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
+            ],
+            _ => [
+                0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000,
+            ],
         }
     };
-    // Smaller digits for more of them, so the text stays inside the disc.
+    // Smaller digits for more of them, so the text stays inside the disc; the
+    // strokes stay at least 2 px wide so they survive the shrink to 16 px.
     let scale = match label.len() {
         1 => 4,
-        2 => 3,
+        2 => 4,
         _ => 2,
     };
-    let width = label.len() * 4 * scale - scale;
+    let width = label.len() * 6 * scale - scale;
     let start_x = (SIZE - width) / 2;
     let start_y = (SIZE - 7 * scale) / 2;
     for (char_index, c) in label.chars().enumerate() {
-        for (row, bits) in digit(c).iter().enumerate() {
-            for col in 0..3 {
-                if bits & (1 << (2 - col)) == 0 {
+        for (row, bits) in glyph(c).iter().enumerate() {
+            for col in 0..5 {
+                if bits & (1 << (4 - col)) == 0 {
                     continue;
                 }
                 for dy in 0..scale {
                     for dx in 0..scale {
-                        let x = start_x + char_index * 4 * scale + col * scale + dx;
+                        let x = start_x + char_index * 6 * scale + col * scale + dx;
                         let y = start_y + row * scale + dy;
                         let i = (y * SIZE + x) * 4;
                         rgba[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
@@ -718,7 +742,7 @@ mod tests {
             // A margin all round, a solid middle, and the corners untouched.
             assert_eq!(alpha(0, 0), 0);
             assert_eq!(alpha(63, 32), 0);
-            assert_eq!(alpha(32, 6), 0, "{count}");
+            assert_eq!(alpha(32, 2), 0, "{count}");
             assert!((0..64).any(|x| alpha(x, 32) == 255));
             // The text stays inside the disc.
             for y in 0..64usize {
@@ -727,7 +751,7 @@ mod tests {
                         pixels[(y * 64 + x) * 4] == 255 && pixels[(y * 64 + x) * 4 + 1] == 255;
                     if white {
                         let (dx, dy) = (x as f32 - 31.5, y as f32 - 31.5);
-                        assert!((dx * dx + dy * dy).sqrt() <= 24.0, "{count}: ({x}, {y})");
+                        assert!((dx * dx + dy * dy).sqrt() <= 28.0, "{count}: ({x}, {y})");
                     }
                 }
             }
