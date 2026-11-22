@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State, Webview};
+use tauri::{AppHandle, Emitter, Manager, State, Webview};
 use tauri_plugin_updater::UpdaterExt;
 
 const RELEASES_URL: &str = "https://github.com/mewisme/mewsenger/releases/latest";
@@ -124,19 +124,7 @@ pub async fn check_update(
     state: State<'_, Mutex<UpdateState>>,
 ) -> Result<UpdateState, String> {
     allowed(&webview)?;
-    if !configured(&app) {
-        return Ok(UpdateState::Unconfigured);
-    }
-    transition(&app, &state, UpdateResult::CheckStarted);
-    let result = match app.updater() {
-        Ok(updater) => match updater.check().await {
-            Ok(Some(update)) => UpdateResult::Found(update.version),
-            Ok(None) => UpdateResult::NoneFound,
-            Err(_) => UpdateResult::Failed(CHECK_FAILED),
-        },
-        Err(_) => UpdateResult::Failed(CHECK_FAILED),
-    };
-    Ok(transition(&app, &state, result))
+    Ok(check(&app, &state).await)
 }
 
 #[tauri::command]
@@ -146,8 +134,31 @@ pub async fn install_update(
     state: State<'_, Mutex<UpdateState>>,
 ) -> Result<UpdateState, String> {
     allowed(&webview)?;
-    if !configured(&app) {
-        return Ok(UpdateState::Unconfigured);
+    Ok(install(&app, &state).await)
+}
+
+/// Looks for an update and records what it found.
+async fn check(app: &AppHandle, state: &Mutex<UpdateState>) -> UpdateState {
+    if !configured(app) {
+        return UpdateState::Unconfigured;
+    }
+
+    transition(app, state, UpdateResult::CheckStarted);
+    let result = match app.updater() {
+        Ok(updater) => match updater.check().await {
+            Ok(Some(update)) => UpdateResult::Found(update.version),
+            Ok(None) => UpdateResult::NoneFound,
+            Err(_) => UpdateResult::Failed(CHECK_FAILED),
+        },
+        Err(_) => UpdateResult::Failed(CHECK_FAILED),
+    };
+    transition(app, state, result)
+}
+
+/// Downloads and installs the newest update, then restarts into it.
+async fn install(app: &AppHandle, state: &Mutex<UpdateState>) -> UpdateState {
+    if !configured(app) {
+        return UpdateState::Unconfigured;
     }
     if cfg!(feature = "portable") {
         // A running portable executable cannot replace itself.
@@ -158,7 +169,7 @@ pub async fn install_update(
         } else {
             UpdateResult::Failed(INSTALL_FAILED)
         };
-        return Ok(transition(&app, &state, result));
+        return transition(app, state, result);
     }
     let update = match app.updater() {
         Ok(updater) => updater.check().await,
@@ -166,25 +177,56 @@ pub async fn install_update(
     };
     let update = match update {
         Ok(Some(update)) => update,
-        Ok(None) => return Ok(transition(&app, &state, UpdateResult::NoneFound)),
-        Err(_) => {
-            return Ok(transition(
-                &app,
-                &state,
-                UpdateResult::Failed(INSTALL_FAILED),
-            ))
-        }
+        Ok(None) => return transition(app, state, UpdateResult::NoneFound),
+        Err(_) => return transition(app, state, UpdateResult::Failed(INSTALL_FAILED)),
     };
-    transition(&app, &state, UpdateResult::InstallStarted);
+    transition(app, state, UpdateResult::InstallStarted);
     if update.download_and_install(|_, _| {}, || {}).await.is_err() {
-        return Ok(transition(
-            &app,
-            &state,
-            UpdateResult::Failed(INSTALL_FAILED),
-        ));
+        return transition(app, state, UpdateResult::Failed(INSTALL_FAILED));
     }
-    transition(&app, &state, UpdateResult::Installed);
+    transition(app, state, UpdateResult::Installed);
     app.restart()
+}
+
+const SCHEDULER_START_DELAY: std::time::Duration = std::time::Duration::from_secs(20);
+const SCHEDULER_TICK: std::time::Duration = std::time::Duration::from_secs(600);
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// Checks for updates by itself: once after start when asked to, and then
+/// whenever the chosen schedule says one is due. The choices are read each
+/// round, so changes in Settings apply without a restart.
+pub fn start_scheduler(app: AppHandle) {
+    if !configured(&app) {
+        return;
+    }
+    std::thread::spawn(move || {
+        std::thread::sleep(SCHEDULER_START_DELAY);
+        let mut first = true;
+        loop {
+            let prefs = crate::prefs::current(&app);
+            let now = unix_now();
+            let due = (first && prefs.check_on_start)
+                || prefs.update_schedule.due(prefs.last_update_check, now);
+            first = false;
+            if due {
+                crate::prefs::record_update_check(&app, now);
+                let state = app.state::<Mutex<UpdateState>>();
+                let found = tauri::async_runtime::block_on(check(&app, &state));
+                if prefs.auto_install
+                    && !cfg!(feature = "portable")
+                    && matches!(found, UpdateState::Available { .. })
+                {
+                    tauri::async_runtime::block_on(install(&app, &state));
+                }
+            }
+            std::thread::sleep(SCHEDULER_TICK);
+        }
+    });
 }
 
 #[cfg(test)]

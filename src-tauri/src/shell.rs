@@ -210,7 +210,9 @@ fn remote_builder(app: &AppHandle, account: &str) -> WebviewBuilder<tauri::Wry> 
         // The creation-time choices go stale once a setting changes; a reload
         // runs that script again, so hand the page the current ones.
         .on_page_load(move |webview, _| {
-            let _ = webview.eval(crate::prefs::page_script(&crate::prefs::current(&page_app)));
+            let prefs = crate::prefs::current(&page_app);
+            let _ = webview.eval(crate::prefs::page_script(&prefs));
+            crate::prefs::apply_webview_theme(&webview, prefs.theme);
         })
         .initialization_script(PAGE_STYLE_SCRIPT)
         .on_navigation(move |url| crate::links::allow_navigation(&navigation_app, url))
@@ -333,9 +335,27 @@ fn reconcile(app: &AppHandle) -> tauri::Result<()> {
 /// Brings the pages in line with the open tabs on a worker (WebView2 creation
 /// must not block the event loop), then runs `after`.
 pub fn sync_tabs(app: &AppHandle, after: impl FnOnce() + Send + 'static) {
+    spawn_sync(app, false, after);
+}
+
+/// Like `sync_tabs` for switching to a tab: Settings drawn over the page is
+/// closed first, so the page that was asked for is what shows.
+pub fn show_tab(app: &AppHandle, after: impl FnOnce() + Send + 'static) {
+    spawn_sync(app, true, after);
+}
+
+fn spawn_sync(app: &AppHandle, dismiss_settings: bool, after: impl FnOnce() + Send + 'static) {
     let app = app.clone();
     std::thread::spawn(move || {
         let _serial = TABS_LOCK.lock();
+        if dismiss_settings {
+            if let Some(main) = app.get_window("main") {
+                if let Some(overlay) = settings_overlay(&main) {
+                    let _ = overlay.close();
+                    wait_until(|| settings_overlay(&main).is_none());
+                }
+            }
+        }
         if let Err(error) = reconcile(&app) {
             eprintln!("could not update Messenger tabs: {error}");
         }
@@ -584,8 +604,23 @@ pub fn show_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), Stri
     if !local_webview(&webview, &[LocalKind::Titlebar]) {
         return Err("title bar required".into());
     }
-    open_settings(&app);
+    toggle_settings(&app);
     Ok(())
+}
+
+/// The title bar's gear: closes Settings drawn over the page when it is open,
+/// opens Settings otherwise.
+fn toggle_settings(app: &AppHandle) {
+    let overlay_open = app
+        .get_window("main")
+        .as_ref()
+        .and_then(settings_overlay)
+        .is_some();
+    if overlay_open {
+        close_settings(app);
+    } else {
+        open_settings(app);
+    }
 }
 
 pub fn open_settings(app: &AppHandle) {

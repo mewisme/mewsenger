@@ -35,6 +35,75 @@ impl ThemePref {
     }
 }
 
+/// How often to look for an update by itself.
+#[derive(Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateSchedule {
+    Off,
+    Hourly,
+    Every6Hours,
+    Every12Hours,
+    #[default]
+    Daily,
+    Weekly,
+    Monthly,
+    EvenDays,
+    OddDays,
+}
+
+const HOUR: u64 = 3600;
+const DAY: u64 = 24 * HOUR;
+
+impl UpdateSchedule {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "off" => Some(Self::Off),
+            "hourly" => Some(Self::Hourly),
+            "every_6_hours" => Some(Self::Every6Hours),
+            "every_12_hours" => Some(Self::Every12Hours),
+            "daily" => Some(Self::Daily),
+            "weekly" => Some(Self::Weekly),
+            "monthly" => Some(Self::Monthly),
+            "even_days" => Some(Self::EvenDays),
+            "odd_days" => Some(Self::OddDays),
+            _ => None,
+        }
+    }
+
+    /// Whether a check is due at `now` (Unix seconds, UTC) given when the
+    /// last one ran. Day parity schedules check once on each matching day of
+    /// the month.
+    pub fn due(self, last: Option<u64>, now: u64) -> bool {
+        let elapsed = |secs: u64| last.is_none_or(|last| now.saturating_sub(last) >= secs);
+        match self {
+            Self::Off => false,
+            Self::Hourly => elapsed(HOUR),
+            Self::Every6Hours => elapsed(6 * HOUR),
+            Self::Every12Hours => elapsed(12 * HOUR),
+            Self::Daily => elapsed(DAY),
+            Self::Weekly => elapsed(7 * DAY),
+            Self::Monthly => elapsed(30 * DAY),
+            Self::EvenDays | Self::OddDays => {
+                let wanted = if self == Self::EvenDays { 0 } else { 1 };
+                day_of_month(now / DAY) % 2 == wanted && elapsed(DAY / 2)
+            }
+        }
+    }
+}
+
+/// Day of the month (1-31, UTC) of a day count since 1970-01-01.
+fn day_of_month(days: u64) -> u64 {
+    // Civil-from-days (H. Hinnant): shift the epoch to 0000-03-01.
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    day_of_year - (153 * month_index + 2) / 5 + 1
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy)]
 #[serde(default)]
 pub struct Prefs {
@@ -56,6 +125,15 @@ pub struct Prefs {
     pub double_click_reply: bool,
     /// Let unused tabs, or the whole app when minimized or in the background, give memory back.
     pub trim_idle_memory: bool,
+    /// Closing the main window hides it to the tray instead of quitting.
+    pub close_to_tray: bool,
+    /// Look for an update when the app starts.
+    pub check_on_start: bool,
+    /// Download and install an update as soon as one is found.
+    pub auto_install: bool,
+    pub update_schedule: UpdateSchedule,
+    /// Unix seconds of the last automatic check; not a setting.
+    pub last_update_check: Option<u64>,
 }
 
 impl Default for Prefs {
@@ -71,6 +149,11 @@ impl Default for Prefs {
             read_ahead: false,
             double_click_reply: false,
             trim_idle_memory: true,
+            close_to_tray: false,
+            check_on_start: true,
+            auto_install: false,
+            update_schedule: UpdateSchedule::Daily,
+            last_update_check: None,
         }
     }
 }
@@ -156,6 +239,9 @@ pub fn apply(mut prefs: Prefs, key: &str, value: bool) -> Result<Prefs, String> 
         "read_ahead" => prefs.read_ahead = value,
         "double_click_reply" => prefs.double_click_reply = value,
         "trim_idle_memory" => prefs.trim_idle_memory = value,
+        "close_to_tray" => prefs.close_to_tray = value,
+        "check_on_start" => prefs.check_on_start = value,
+        "auto_install" => prefs.auto_install = value,
         _ => return Err("unknown preference".into()),
     }
     Ok(prefs)
@@ -185,7 +271,41 @@ pub fn set(app: &AppHandle, key: &str, value: bool) -> Result<Prefs, String> {
 /// Applies the saved colour scheme to every window and view.
 pub fn apply_theme(app: &AppHandle, theme: ThemePref) {
     app.set_theme(theme.window_theme());
+    for (label, webview) in app.webviews() {
+        if label.starts_with("messenger-") {
+            apply_webview_theme(&webview, theme);
+        }
+    }
 }
+
+/// Tells a page which scheme `prefers-color-scheme` reports. The window theme
+/// alone does not reach a WebView2 page, so Messenger would keep the old
+/// look after a switch.
+#[cfg(windows)]
+pub fn apply_webview_theme(webview: &tauri::Webview, theme: ThemePref) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_13, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO,
+        COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
+    };
+    use windows::core::Interface;
+    let scheme = match theme {
+        ThemePref::System => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO,
+        ThemePref::Dark => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
+        ThemePref::Light => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
+    };
+    let _ = webview.with_webview(move |platform| unsafe {
+        if let Ok(core) = platform.controller().CoreWebView2() {
+            if let Ok(core) = core.cast::<ICoreWebView2_13>() {
+                if let Ok(profile) = core.Profile() {
+                    let _ = profile.SetPreferredColorScheme(scheme);
+                }
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+pub fn apply_webview_theme(_webview: &tauri::Webview, _theme: ThemePref) {}
 
 pub fn set_theme(app: &AppHandle, value: &str) -> Result<Prefs, String> {
     let theme = ThemePref::parse(value).ok_or("unknown theme")?;
@@ -202,6 +322,36 @@ pub fn set_theme(app: &AppHandle, value: &str) -> Result<Prefs, String> {
     apply_theme(app, theme);
     let _ = app.emit_to("settings", "prefs-changed", next);
     Ok(next)
+}
+
+/// Saves how often updates are checked for by themselves.
+pub fn set_schedule(app: &AppHandle, value: &str) -> Result<Prefs, String> {
+    let schedule = UpdateSchedule::parse(value).ok_or("unknown schedule")?;
+    let state = app.state::<Mutex<Prefs>>();
+    let mut guard = state.lock().map_err(|_| "preferences unavailable")?;
+    let mut next = *guard;
+    next.update_schedule = schedule;
+    save(app, &next).map_err(|error| {
+        eprintln!("could not save preferences: {error}");
+        "could not save preferences".to_string()
+    })?;
+    *guard = next;
+    drop(guard);
+    let _ = app.emit_to("settings", "prefs-changed", next);
+    Ok(next)
+}
+
+/// Remembers when an automatic update check ran.
+pub fn record_update_check(app: &AppHandle, now: u64) {
+    let state = app.state::<Mutex<Prefs>>();
+    let Ok(mut guard) = state.lock() else { return };
+    let mut next = *guard;
+    next.last_update_check = Some(now);
+    if let Err(error) = save(app, &next) {
+        eprintln!("could not save preferences: {error}");
+        return;
+    }
+    *guard = next;
 }
 
 fn trusted_settings_view(webview: &tauri::Webview) -> bool {
@@ -250,9 +400,75 @@ pub fn set_theme_preference(
     set_theme(&app, &value)
 }
 
+#[tauri::command]
+pub fn set_update_schedule(
+    app: AppHandle,
+    webview: tauri::Webview,
+    value: String,
+) -> Result<Prefs, String> {
+    if !trusted_settings_view(&webview) {
+        return Err("settings view required".into());
+    }
+    set_schedule(&app, &value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const NOW: u64 = 1_800_000_000; // 2027-01-15 08:00:00 UTC, an odd day of the month
+
+    #[test]
+    fn day_of_month_matches_known_dates() {
+        assert_eq!(day_of_month(0), 1); // 1970-01-01
+        assert_eq!(day_of_month(59), 1); // 1970-03-01
+        assert_eq!(day_of_month(58), 28); // 1970-02-28
+        assert_eq!(day_of_month(NOW / DAY), 15);
+        assert_eq!(day_of_month(11_016), 29); // 2000-02-29
+    }
+
+    #[test]
+    fn interval_schedules_wait_for_their_period() {
+        assert!(UpdateSchedule::Daily.due(None, NOW));
+        assert!(!UpdateSchedule::Off.due(None, NOW));
+        assert!(!UpdateSchedule::Hourly.due(Some(NOW - 3599), NOW));
+        assert!(UpdateSchedule::Hourly.due(Some(NOW - 3600), NOW));
+        assert!(!UpdateSchedule::Every12Hours.due(Some(NOW - 11 * HOUR), NOW));
+        assert!(UpdateSchedule::Every12Hours.due(Some(NOW - 12 * HOUR), NOW));
+        assert!(!UpdateSchedule::Weekly.due(Some(NOW - 6 * DAY), NOW));
+        assert!(UpdateSchedule::Monthly.due(Some(NOW - 30 * DAY), NOW));
+        // A clock set back never makes a check due by itself.
+        assert!(!UpdateSchedule::Daily.due(Some(NOW + DAY), NOW));
+    }
+
+    #[test]
+    fn day_parity_schedules_check_once_on_matching_days() {
+        assert!(UpdateSchedule::OddDays.due(None, NOW));
+        assert!(!UpdateSchedule::EvenDays.due(None, NOW));
+        assert!(!UpdateSchedule::OddDays.due(Some(NOW - HOUR), NOW));
+        assert!(UpdateSchedule::OddDays.due(Some(NOW - 2 * DAY), NOW));
+        assert!(UpdateSchedule::EvenDays.due(Some(NOW - DAY), NOW + DAY));
+    }
+
+    #[test]
+    fn schedule_parses_known_names_and_defaults_to_daily() {
+        assert_eq!(
+            UpdateSchedule::parse("every_6_hours"),
+            Some(UpdateSchedule::Every6Hours)
+        );
+        assert_eq!(UpdateSchedule::parse("sometimes"), None);
+        assert_eq!(from_json("{}").update_schedule, UpdateSchedule::Daily);
+        assert_eq!(
+            from_json("{\"update_schedule\":\"odd_days\"}").update_schedule,
+            UpdateSchedule::OddDays
+        );
+        assert_eq!(
+            from_json("{\"update_schedule\":\"nope\"}").update_schedule,
+            UpdateSchedule::Daily
+        );
+        let prefs = from_json("{}");
+        assert!(!prefs.close_to_tray && prefs.check_on_start && !prefs.auto_install);
+    }
 
     #[test]
     fn theme_is_system_unless_chosen_and_only_known_names_parse() {

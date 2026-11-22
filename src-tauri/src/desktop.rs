@@ -277,11 +277,16 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         return;
     }
     if let WindowEvent::CloseRequested { api, .. } = event {
-        if !TRAY_AVAILABLE.load(Ordering::Relaxed) {
-            return;
+        let app = window.app_handle();
+        if TRAY_AVAILABLE.load(Ordering::Relaxed) && crate::prefs::current(app).close_to_tray {
+            api.prevent_close();
+            let _ = window.hide();
+        } else {
+            // Settings or a popup may still be open; closing the main window
+            // ends the app.
+            api.prevent_close();
+            app.exit(0);
         }
-        api.prevent_close();
-        let _ = window.hide();
     }
 }
 

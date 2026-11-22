@@ -50,6 +50,35 @@ pub fn open_external<R: Runtime>(app: &AppHandle<R>, url: &Url) {
     }
 }
 
+const PROJECT_URL: &str = "https://github.com/mewisme/mewsenger";
+
+/// The project page behind a name Settings sends; never an arbitrary URL.
+fn project_page(page: &str) -> Option<String> {
+    match page {
+        "repo" => Some(PROJECT_URL.to_string()),
+        "releases" => Some(format!("{PROJECT_URL}/releases")),
+        "issues" => Some(format!("{PROJECT_URL}/issues")),
+        "license" => Some(format!("{PROJECT_URL}/blob/main/LICENSE")),
+        _ => None,
+    }
+}
+
+/// Opens one of the project's pages in the default browser.
+#[tauri::command]
+pub fn open_project_link(
+    app: AppHandle,
+    webview: tauri::Webview,
+    page: String,
+) -> Result<(), String> {
+    if !crate::shell::local_webview(&webview, &[crate::shell::LocalKind::Settings]) {
+        return Err("settings view required".into());
+    }
+    let url = project_page(&page).ok_or("unknown page")?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|_| "could not open the page".to_string())
+}
+
 fn unwrap_link_shim(url: &Url) -> Option<Url> {
     if !is_link_shim(url) {
         return None;
@@ -170,6 +199,17 @@ mod tests {
             "https://example.com/l.php?u=https%3A%2F%2Fexample.org"
         ))
         .is_none());
+    }
+
+    #[test]
+    fn project_links_are_named_pages_never_arbitrary_urls() {
+        assert_eq!(
+            project_page("releases").as_deref(),
+            Some("https://github.com/mewisme/mewsenger/releases")
+        );
+        assert!(project_page("repo").is_some() && project_page("license").is_some());
+        assert_eq!(project_page("https://example.com"), None);
+        assert_eq!(project_page(""), None);
     }
 
     #[test]

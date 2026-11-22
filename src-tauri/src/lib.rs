@@ -70,6 +70,8 @@ pub fn run() {
             prefs::get_preferences,
             prefs::set_preference,
             prefs::set_theme_preference,
+            prefs::set_update_schedule,
+            links::open_project_link,
             downloads::reveal_last_download,
             updater::get_update_state,
             updater::check_update,
@@ -77,7 +79,6 @@ pub fn run() {
             diagnostics::get_diagnostics,
             accounts::list_accounts,
             accounts::add_account,
-            accounts::rename_account,
             accounts::remove_account,
             accounts::open_account,
             accounts::close_tab,
@@ -121,6 +122,7 @@ pub fn run() {
             if updater_configured {
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
+                updater::start_scheduler(app.handle().clone());
             }
             let window = WindowBuilder::new(app, "main")
                 .title("Mewsenger")
