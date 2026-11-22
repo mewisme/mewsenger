@@ -8,7 +8,6 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:app:allow-version",
-    "core:window:allow-close",
     "allow-get-preferences",
     "allow-set-preference",
     "allow-set-theme-preference",
@@ -23,8 +22,6 @@
     "allow-add-account",
     "allow-remove-account",
     "allow-open-account",
-    "allow-set-settings-placement",
-    "allow-close-settings",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"

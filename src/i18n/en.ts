@@ -21,6 +21,7 @@ export const en = {
   "tabs.label": "Accounts",
   "tabs.newTab": "New tab",
   "tabs.closeTab": "Close tab {name}",
+  "tabs.closeSettings": "Close Settings",
   "tabs.newMessage": "{name}: new message",
   "tabs.signInNew": "Sign in to a new account",
   "account.anonymous": "Anonymous",
@@ -107,9 +108,6 @@ export const en = {
   "accounts.removeBody": "This signs the account out and deletes its data on this computer.",
   "accounts.cancel": "Cancel",
   "accounts.removeConfirm": "Remove account",
-  "accounts.overlay": "Open settings over the page",
-  "accounts.overlayHint": "Settings open on top of the main window instead of in their own window. Applies the next time settings open.",
-  "accounts.placementFailed": "Could not change where settings open",
 
   // Settings: privacy
   "privacy.title": "Privacy",

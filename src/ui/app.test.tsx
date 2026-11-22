@@ -64,7 +64,7 @@ test("an unknown webview label falls back to the title bar; version lives in Set
   expect(runtime.getVersion).not.toHaveBeenCalled();
 });
 
-test("the settings window reads the installed version and has no close button of its own", async () => {
+test("settings read the installed version and have no close button of their own", async () => {
   runtime.view = "settings";
   const user = userEvent.setup();
   render(<DesktopApp />);
@@ -72,15 +72,6 @@ test("the settings window reads the installed version and has no close button of
   expect(await screen.findByText(/Version 2\.3\.4/)).toBeTruthy();
   expect(screen.queryByRole("banner")).toBeNull();
   expect(screen.queryByRole("button", { name: "Close settings" })).toBeNull();
-});
-
-test("settings drawn over the page have no close button; the gear toggles them", async () => {
-  runtime.view = "settings";
-  window.history.pushState({}, "", "/?view=settings&overlay=1");
-  render(<DesktopApp />);
-  expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: /close/i })).toBeNull();
-  expect(runtime.invoke).not.toHaveBeenCalledWith("close_settings");
 });
 
 test("does not invent data outside the Tauri runtime", () => {
@@ -189,5 +180,5 @@ test("removes every title bar subscription when it unmounts", async () => {
   const { unmount } = render(<DesktopApp />);
   await waitFor(() => expect(runtime.invoke).toHaveBeenCalledWith("get_update_state"));
   unmount();
-  expect(runtime.unlisten).toHaveBeenCalledTimes(5);
+  expect(runtime.unlisten).toHaveBeenCalledTimes(6);
 });

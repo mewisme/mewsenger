@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { parseAccounts, parseOverlay, parseTabMenu, parseTabs, resolveLocalView } from "./local-view";
+import { parseAccounts, parseTabMenu, parseTabs, resolveLocalView } from "./local-view";
 
 test("routes local assets by their explicit URL rather than potentially shared runtime metadata", () => {
   expect(resolveLocalView("?view=titlebar", "settings")).toBe("titlebar");
@@ -63,8 +63,3 @@ test("the tab menu may list no accounts and defaults the next number", () => {
   });
 });
 
-test("the overlay flag is explicit", () => {
-  expect(parseOverlay("?view=settings&overlay=1")).toBe(true);
-  expect(parseOverlay("?view=settings")).toBe(false);
-  expect(parseOverlay("?overlay=yes")).toBe(false);
-});

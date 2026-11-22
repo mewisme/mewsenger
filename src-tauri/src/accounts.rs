@@ -32,19 +32,9 @@ impl Account {
     }
 }
 
-/// Where Settings opens: its own window, or over the main window's page.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum SettingsPlacement {
-    #[default]
-    Window,
-    Overlay,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Config {
-    pub settings: SettingsPlacement,
     /// Tab on screen; restored on the next start.
     pub active: String,
     /// Accounts that have a tab, in tab order. Closing a tab keeps the
@@ -57,7 +47,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            settings: SettingsPlacement::Window,
             active: FIRST.into(),
             open: vec![FIRST.into()],
             next_id: 2,
@@ -659,28 +648,6 @@ pub fn close_tab_menu(app: AppHandle, webview: tauri::Webview) -> Result<(), Str
     Ok(())
 }
 
-#[tauri::command]
-pub fn set_settings_placement(
-    app: AppHandle,
-    webview: tauri::Webview,
-    placement: SettingsPlacement,
-) -> Result<Config, String> {
-    settings_view(&webview)?;
-    let (_, config) = mutate(&app, |c| {
-        c.settings = placement;
-        Ok(())
-    })?;
-    announce(&app, &config);
-    Ok(config)
-}
-
-#[tauri::command]
-pub fn close_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
-    settings_view(&webview)?;
-    crate::shell::close_settings(&app);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -848,7 +815,6 @@ mod tests {
         assert_eq!(config.open, vec!["a1", "a2"]);
         assert_eq!(config.shown_account(), "a2");
         assert_eq!(config.next_id, 3);
-        assert_eq!(config.settings, SettingsPlacement::Window);
     }
 
     #[test]

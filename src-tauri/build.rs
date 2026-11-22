@@ -34,8 +34,6 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "notification_event",
-            "set_settings_placement",
-            "close_settings",
             "test_notification",
             "show_settings",
             "get_preferences",

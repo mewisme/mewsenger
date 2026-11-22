@@ -287,14 +287,13 @@ test("About opens the project pages through the app", async () => {
   }
 });
 
-test("settings drawn over the page have no close button", () => {
-  render(<Settings version="0.1.14" overlay />);
+test("settings have no close button of their own", () => {
+  render(<Settings version="0.1.14" />);
   expect(screen.queryByRole("button", { name: /close/i })).toBeNull();
 });
 
 const account = (id: string, name?: string): AccountInfo => ({ id, name: `Account ${id}`, ...(name ? { display_name: name } : {}) });
 const config = (names: (string | undefined)[], open: string[] = ["a1"], active = "a1"): AccountsConfig => ({
-  settings: "window",
   active,
   open,
   next_id: names.length + 1,
@@ -390,18 +389,6 @@ test("rows tell which account is showing, open in a tab, or closed, and the butt
   expect(mock.invoke).toHaveBeenCalledWith("open_account", { id: "a1" });
   await user.click(screen.getByRole("button", { name: "Open Spare" }));
   expect(mock.invoke).toHaveBeenCalledWith("open_account", { id: "a3" });
-});
-
-test("settings placement is a switch", async () => {
-  backend(config(["Home", "Work"]), (command) =>
-    (command === "set_settings_placement" ? { ...config(["Home", "Work"]), settings: "overlay" } : undefined));
-  const user = userEvent.setup();
-  await openAccounts(user);
-  const overlay = () => screen.getByRole("switch", { name: "Open settings over the page" });
-  await waitFor(() => expect(overlay().getAttribute("aria-checked")).toBe("false"));
-  await user.click(overlay());
-  expect(mock.invoke).toHaveBeenCalledWith("set_settings_placement", { placement: "overlay" });
-  await waitFor(() => expect(overlay().getAttribute("aria-checked")).toBe("true"));
 });
 
 test("changes announced elsewhere refresh the list", async () => {

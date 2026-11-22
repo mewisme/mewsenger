@@ -3,7 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { TitleBar } from "@/ui/title-bar";
-import { parseOverlay, parseTabMenu, parseTabs, resolveLocalView } from "@/ui/local-view";
+import { parseTabMenu, parseTabs, resolveLocalView } from "@/ui/local-view";
 import { Settings } from "@/ui/settings";
 import { TabMenu } from "@/ui/tab-menu";
 
@@ -27,7 +27,7 @@ export function DesktopApp() {
 
   if (localView === "tabmenu") return <TabMenu view={parseTabMenu(search)} />;
 
-  if (settingsView) return <Settings version={version} overlay={parseOverlay(search)} />;
+  if (settingsView) return <Settings version={version} />;
 
   return <TitleBar tabs={parseTabs(search)} />;
 }

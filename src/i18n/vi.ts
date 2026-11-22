@@ -23,6 +23,7 @@ export const vi: Record<MessageKey, string> = {
   "tabs.label": "Tài khoản",
   "tabs.newTab": "Thẻ mới",
   "tabs.closeTab": "Đóng thẻ {name}",
+  "tabs.closeSettings": "Đóng Cài đặt",
   "tabs.newMessage": "{name}: có tin nhắn mới",
   "tabs.signInNew": "Đăng nhập tài khoản mới",
   "account.anonymous": "Ẩn danh",
@@ -109,9 +110,6 @@ export const vi: Record<MessageKey, string> = {
   "accounts.removeBody": "Thao tác này đăng xuất tài khoản và xóa dữ liệu của nó trên máy tính này.",
   "accounts.cancel": "Hủy",
   "accounts.removeConfirm": "Xóa tài khoản",
-  "accounts.overlay": "Mở cài đặt trên trang chính",
-  "accounts.overlayHint": "Cài đặt mở phủ lên cửa sổ chính thay vì cửa sổ riêng. Áp dụng ở lần mở cài đặt tiếp theo.",
-  "accounts.placementFailed": "Không thể đổi nơi mở cài đặt",
 
   // Settings: privacy
   "privacy.title": "Riêng tư",

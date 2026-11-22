@@ -38,12 +38,12 @@ test('no capability hands the default core permission set to Messenger or popups
 test('local views receive exactly the commands they use', () => {
   assert.deepEqual(byId('settings').permissions, [
     'core:event:allow-listen', 'core:event:allow-unlisten', 'core:app:allow-version',
-    'core:window:allow-close', 'allow-get-preferences', 'allow-set-preference',
+    'allow-get-preferences', 'allow-set-preference',
     'allow-set-theme-preference', 'allow-set-update-schedule', 'allow-open-project-link',
     'allow-get-update-state', 'allow-check-update', 'allow-install-update',
     'allow-get-diagnostics', 'allow-test-notification', 'allow-list-accounts',
     'allow-add-account', 'allow-remove-account',
-    'allow-open-account', 'allow-set-settings-placement', 'allow-close-settings',
+    'allow-open-account',
     'autostart:allow-enable', 'autostart:allow-disable', 'autostart:allow-is-enabled',
   ]);
   assert.equal(byId('default'), undefined);
@@ -76,8 +76,7 @@ test('local views are granted by label pattern, one capability per kind', () => 
 });
 
 test('account and tab commands reach only the views that use them', () => {
-  const settingsOnly = ['allow-remove-account',
-    'allow-set-settings-placement', 'allow-close-settings'];
+  const settingsOnly = ['allow-remove-account'];
   const tabViews = ['allow-open-account', 'allow-add-account', 'allow-list-accounts'];
   const allowed = {
     settings: [...settingsOnly, ...tabViews],

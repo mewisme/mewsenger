@@ -61,7 +61,7 @@ function PrefSwitch({ pref, id, label, hint, fallback, controls }: {
   );
 }
 
-export function Settings({ version, overlay = false }: { version: string; overlay?: boolean }) {
+export function Settings({ version }: { version: string }) {
   const t = useT();
   const [language, setLanguage] = useLanguageSetting();
   const [prefs, setPrefs] = useState<Preferences | null>(null);
@@ -149,9 +149,9 @@ export function Settings({ version, overlay = false }: { version: string; overla
       <Tabs defaultValue="general" className="min-h-0 flex-1 gap-0">
         <div className="border-b border-border px-4 pt-3">
           <h1 className="mb-2 text-base font-semibold">{t("settings.title")}</h1>
-          <div className="-mb-px overflow-x-auto">
+          <div className="-mb-px overflow-x-auto overflow-y-hidden pb-1">
             <TabsList variant="line" aria-label={t("settings.title")}
-              className="h-9 w-max gap-1 p-0">
+              className="h-11 w-max gap-1 p-0">
               {TABS.map(({ value, icon: Icon, label }) => (
                 <TabsTrigger key={value} value={value} className="flex-none px-3">
                   <Icon aria-hidden="true" className="size-4" />
@@ -162,8 +162,7 @@ export function Settings({ version, overlay = false }: { version: string; overla
           </div>
         </div>
         <ScrollArea className="min-h-0 flex-1">
-          <div data-overlay={overlay ? "true" : undefined}
-            className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
+          <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
             {error && (
               <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>
             )}

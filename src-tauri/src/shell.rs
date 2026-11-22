@@ -353,6 +353,7 @@ fn spawn_sync(app: &AppHandle, dismiss_settings: bool, after: impl FnOnce() + Se
                 if let Some(overlay) = settings_overlay(&main) {
                     let _ = overlay.close();
                     wait_until(|| settings_overlay(&main).is_none());
+                    announce_settings(&app, false);
                 }
             }
         }
@@ -584,8 +585,7 @@ impl Drop for SettingsOpening {
     }
 }
 
-/// Settings drawn over `window`, if any. Looked up among the window's own
-/// views: the app-wide label lookup would also find a settings window.
+/// Settings drawn over `window`, if any.
 fn settings_overlay(window: &Window) -> Option<tauri::Webview> {
     window
         .webviews()
@@ -593,10 +593,11 @@ fn settings_overlay(window: &Window) -> Option<tauri::Webview> {
         .find(|v| v.label() == SETTINGS)
 }
 
-/// The separate settings window, if open.
-fn settings_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
-    app.get_window(SETTINGS)?;
-    app.get_webview_window(SETTINGS)
+/// Tells the title bar whether Settings is open, so it can show its tab.
+fn announce_settings(app: &AppHandle, open: bool) {
+    let _ = app.emit_filter("settings-state", open, |target| {
+        matches!(target, tauri::EventTarget::Webview { label } if label.starts_with("titlebar-"))
+    });
 }
 
 #[tauri::command]
@@ -608,93 +609,33 @@ pub fn show_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), Stri
     Ok(())
 }
 
-/// The title bar's gear: closes Settings drawn over the page when it is open,
-/// opens Settings otherwise.
+/// The title bar's gear and the Settings tab: closes Settings when it is
+/// open, opens it otherwise.
 fn toggle_settings(app: &AppHandle) {
-    let overlay_open = app
+    let open = app
         .get_window("main")
         .as_ref()
         .and_then(settings_overlay)
         .is_some();
-    if overlay_open {
+    if open {
         close_settings(app);
     } else {
         open_settings(app);
     }
 }
 
-pub fn open_settings(app: &AppHandle) {
-    if accounts::snapshot(app).settings == accounts::SettingsPlacement::Overlay {
-        open_settings_overlay(app);
-    } else {
-        open_settings_window(app);
-    }
-}
-
-fn focus_window(window: &tauri::WebviewWindow) {
-    let _ = window.show();
-    let _ = window.unminimize();
-    let _ = window.set_focus();
-}
-
-/// Settings in its own window.
-fn open_settings_window(app: &AppHandle) {
-    if let Some(window) = settings_window(app) {
-        focus_window(&window);
-        return;
-    }
-    if let Some(overlay) = app.get_window("main").as_ref().and_then(settings_overlay) {
-        let _ = overlay.set_focus();
-        return;
-    }
-    // WebView2 window creation from a synchronous callback can block the
-    // native event loop, so build it off the event thread.
-    if SETTINGS_OPENING.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let _opening = SettingsOpening;
-        if let Some(window) = settings_window(&app) {
-            focus_window(&window);
-            return;
-        }
-        match tauri::WebviewWindowBuilder::new(
-            &app,
-            SETTINGS,
-            WebviewUrl::App("index.html?view=settings".into()),
-        )
-        .on_navigation(local_asset_url)
-        .title("Mewsenger settings")
-        .inner_size(480.0, 620.0)
-        .min_inner_size(420.0, 360.0)
-        .resizable(true)
-        .visible(false)
-        .center()
-        .build()
-        {
-            Ok(window) => focus_window(&window),
-            Err(error) => eprintln!("could not open settings: {error}"),
-        }
-    });
-}
-
-/// Settings drawn over the main window's page, between title bar and footer.
+/// Settings drawn over the main window's page, below the title bar.
 fn add_settings_overlay(window: &Window) -> tauri::Result<()> {
     let (width, height) = bounds(window)?;
     window.add_child(
-        local_builder(SETTINGS.to_string(), "view=settings&overlay=1"),
+        local_builder(SETTINGS.to_string(), "view=settings"),
         LogicalPosition::new(0.0, HEADER_HEIGHT),
         LogicalSize::new(width, (height - HEADER_HEIGHT).max(1.0)),
     )?;
     resize(window)
 }
 
-fn open_settings_overlay(app: &AppHandle) {
-    if let Some(window) = settings_window(app) {
-        focus_window(&window);
-        return;
-    }
+pub fn open_settings(app: &AppHandle) {
     crate::desktop::show_main(app);
     let Some(main) = app.get_window("main") else {
         return;
@@ -703,27 +644,29 @@ fn open_settings_overlay(app: &AppHandle) {
         let _ = overlay.set_focus();
         return;
     }
+    // WebView2 creation from a synchronous callback can block the native
+    // event loop, so build it off the event thread.
     if SETTINGS_OPENING.swap(true, Ordering::AcqRel) {
         return;
     }
+    let app = app.clone();
     std::thread::spawn(move || {
         let _opening = SettingsOpening;
         if settings_overlay(&main).is_none() {
-            if let Err(error) = add_settings_overlay(&main) {
-                eprintln!("could not open settings: {error}");
+            match add_settings_overlay(&main) {
+                Ok(()) => announce_settings(&app, true),
+                Err(error) => eprintln!("could not open settings: {error}"),
             }
         }
     });
 }
 
-/// Closes Settings, whichever way it is open.
 pub fn close_settings(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         if let Some(overlay) = app.get_window("main").as_ref().and_then(settings_overlay) {
             let _ = overlay.close();
-        } else if let Some(window) = settings_window(&app) {
-            let _ = window.close();
+            announce_settings(&app, false);
         }
     });
 }

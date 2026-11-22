@@ -8,10 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
 import { useT } from "@/i18n";
 import { AccountAvatar, accountLabel } from "@/ui/account-avatar";
-import { SwitchRow } from "@/ui/setting-row";
 
 export interface AccountInfo {
   id: string;
@@ -23,10 +21,7 @@ export interface AccountInfo {
   picture?: string;
 }
 
-export type SettingsPlacement = "window" | "overlay";
-
 export interface AccountsConfig {
-  settings: SettingsPlacement;
   active: string;
   open: string[];
   next_id: number;
@@ -133,11 +128,6 @@ export function AccountsSection() {
             <Plus aria-hidden="true" />
             {t("accounts.add")}
           </Button>
-          <Separator />
-          <SwitchRow id="pref-overlay" label={t("accounts.overlay")} hint={t("accounts.overlayHint")}
-            checked={config?.settings === "overlay"} disabled={config === null}
-            onChange={(value) => run("set_settings_placement",
-              { placement: value ? "overlay" : "window" }, t("accounts.placementFailed"))} />
           {message && <p role="alert" className="text-xs text-destructive">{message}</p>}
         </CardContent>
       </Card>

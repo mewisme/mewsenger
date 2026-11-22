@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Plus, X } from "lucide-react";
+import { Plus, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useT } from "@/i18n";
@@ -93,6 +93,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
   const [order, setOrder] = useState<string[] | null>(null);
   const [dragView, setDragView] = useState<DragView | null>(null);
   const [alerts, setAlerts] = useState<Record<string, TabAlert>>({});
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const plus = useRef<HTMLButtonElement>(null);
   const holders = useRef(new Map<string, HTMLElement>());
   const drag = useRef<DragState | null>(null);
@@ -133,6 +134,9 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
       cancelRef.current();
       setOrder(null);
       setView({ accounts: payload.accounts.map(shown), open: payload.open, active: payload.active });
+    });
+    subscribe("settings-state", (payload) => {
+      if (typeof payload === "boolean") setSettingsOpen(payload);
     });
     subscribe("tab-alert", (payload) => {
       if (isTabAlert(payload)) setAlerts((current) => ({ ...current, [payload.account]: { title: payload.title, body: payload.body } }));
@@ -266,7 +270,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
 
   return (
     <Tabs
-      value={view.active}
+      value={settingsOpen ? "" : view.active}
       onValueChange={(id) => select(id, false)}
       className="h-full min-w-0 items-end gap-0.5 pl-1 data-horizontal:flex-row"
     >
@@ -275,7 +279,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
         className="h-9 w-auto min-w-0 items-end justify-start gap-0.5 rounded-none bg-transparent p-0"
       >
         {tabs.map((account, index) => {
-          const selected = account.id === view.active;
+          const selected = !settingsOpen && account.id === view.active;
           const alert = selected ? undefined : alerts[account.id];
           const dragging = dragView?.id === account.id;
           return (
@@ -361,6 +365,23 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
             </div>
           );
         })}
+        {settingsOpen && (
+          <div className="group/tab relative -mb-px h-[calc(2.25rem+1px)] w-40 min-w-[72px] max-w-40 shrink">
+            <div role="tab" aria-selected="true" aria-label={t("titlebar.settings")} title={t("titlebar.settings")}
+              className="flex h-full w-full cursor-default items-center gap-2 overflow-hidden bg-background px-3 pb-px pr-7 text-xs text-foreground">
+              <Settings aria-hidden="true" className="size-4 shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-left">{t("titlebar.settings")}</span>
+            </div>
+            <button
+              type="button"
+              aria-label={t("tabs.closeSettings")}
+              onClick={() => void invoke("show_settings").catch(() => {})}
+              className="absolute right-2 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center transition-colors hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X aria-hidden="true" className="size-3" />
+            </button>
+          </div>
+        )}
       </TabsList>
       <button
         ref={plus}

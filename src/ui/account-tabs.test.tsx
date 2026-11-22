@@ -201,3 +201,23 @@ test("a message for a tab behind the active one animates that tab until it is op
   act(() => alerted({ payload: { account: "a3", title: 7 } }));
   expect(screen.getByRole("tab", { name: "Spare" })).toBeTruthy();
 });
+
+test("an open Settings shows as the selected tab, and its x closes it", async () => {
+  render(<AccountTabs initial={VIEW} />);
+  const state = runtime.listen.mock.calls.find(([name]) => name === "settings-state")![1] as
+    (event: { payload: unknown }) => void;
+  expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull();
+  act(() => state({ payload: true }));
+  const settings = await screen.findByRole("tab", { name: "Settings" });
+  expect(settings.getAttribute("aria-selected")).toBe("true");
+  // The account that was in front no longer looks selected.
+  expect(screen.getByRole("tab", { name: "Home" }).getAttribute("aria-selected")).toBe("false");
+  runtime.invoke.mockClear();
+  fireEvent.click(screen.getByRole("button", { name: "Close Settings" }));
+  expect(runtime.invoke).toHaveBeenCalledWith("show_settings");
+  act(() => state({ payload: false }));
+  expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull();
+  expect(screen.getByRole("tab", { name: "Home" }).getAttribute("aria-selected")).toBe("true");
+  act(() => state({ payload: "yes" }));
+  expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull();
+});

@@ -85,9 +85,7 @@ pub fn run() {
             accounts::move_tab,
             accounts::tab_shortcut,
             accounts::open_tab_menu,
-            accounts::close_tab_menu,
-            accounts::set_settings_placement,
-            accounts::close_settings
+            accounts::close_tab_menu
         ])
         .on_window_event(|window, event| {
             desktop::on_window_event(window, event);

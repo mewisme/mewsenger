@@ -86,8 +86,3 @@ export function parseTabMenu(search: string): TabMenuView {
   const next = Number(params.get("next"));
   return { accounts, next: Number.isInteger(next) && next > 0 ? next : 2 };
 }
-
-/** True when settings are drawn over the main window (`?overlay=1`). */
-export function parseOverlay(search: string): boolean {
-  return new URLSearchParams(search).get("overlay") === "1";
-}
