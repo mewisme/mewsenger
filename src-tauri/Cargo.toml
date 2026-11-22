@@ -5,7 +5,6 @@ description = "Desktop client for Messenger"
 authors = ["Mew"]
 license = "MIT"
 repository = "https://github.com/mewisme/mewsenger"
-homepage = "https://github.com/mewisme/mewsenger"
 readme = "../README.md"
 keywords = ["messenger", "tauri", "desktop"]
 categories = ["gui"]
