@@ -162,6 +162,24 @@ test('clicking the chat that is already open puts the cursor back in the message
   assert.equal(field.focused, 2);
 });
 
+test('a click on a chat wins over the heading Facebook focuses, a plain chat change does not', () => {
+  const p = page();
+  const field = new p.Element();
+  p.state.field = field;
+  p.flush();
+  const heading = new p.Element();
+  p.document.activeElement = heading;
+  p.location.pathname = '/t/456';
+  p.state.observe();
+  p.flush();
+  assert.equal(field.focused, 1, 'no click: the heading keeps the focus');
+  const link = new p.Element();
+  link.href = 'https://www.messenger.com/t/456';
+  p.fire('document:click', { target: link });
+  p.flush();
+  assert.equal(field.focused, 2);
+});
+
 test('a click that is not on a chat leaves the focus alone', () => {
   const p = page();
   const field = new p.Element();
