@@ -402,11 +402,6 @@ pub fn mutate<T>(
     Ok((value, next))
 }
 
-/// Account on screen, which tray actions target.
-pub fn active_account(app: &AppHandle) -> String {
-    snapshot(app).shown_account().to_string()
-}
-
 fn encode_component(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {

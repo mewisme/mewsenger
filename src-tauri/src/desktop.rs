@@ -71,16 +71,6 @@ fn is_account_window(label: &str) -> bool {
     label == MAIN
 }
 
-fn show_all(app: &AppHandle) {
-    show_main(app);
-}
-
-fn hide_all(app: &AppHandle) {
-    if let Some(window) = app.get_window(MAIN) {
-        let _ = window.hide();
-    }
-}
-
 /// Shows an account's tab and puts focus in its page.
 pub(crate) fn open_account(app: &AppHandle, account: &str) {
     if accounts::snapshot(app).account(account).is_none() {
@@ -103,56 +93,9 @@ fn dispatch(app: &AppHandle, id: &str) {
         open_account(app, account);
         return;
     }
-    let active = accounts::active_account(app);
-    let remote = || app.get_webview(&accounts::remote_label(&active));
     match id {
         "quit" => app.exit(0),
-        "show" => show_all(app),
-        "hide" => hide_all(app),
-        "search" | "new-chat" | "account" | "logout" | "next-chat" | "prev-chat" | "zoom-in"
-        | "zoom-out" | "zoom-reset" => {
-            show_account(app, &active);
-            if let Some(window) = remote() {
-                let script = match id {
-                    "search" => r#"window.__mewDesktopAction?.("search")"#,
-                    "new-chat" => r#"window.__mewDesktopAction?.("new-chat")"#,
-                    "account" => r#"window.__mewDesktopAction?.("account")"#,
-                    "logout" => r#"window.__mewDesktopAction?.("logout")"#,
-                    "next-chat" => r#"window.__mewDesktopAction?.("next-chat")"#,
-                    "prev-chat" => r#"window.__mewDesktopAction?.("prev-chat")"#,
-                    "zoom-in" => r#"window.__mewDesktopAction?.("zoom-in")"#,
-                    "zoom-out" => r#"window.__mewDesktopAction?.("zoom-out")"#,
-                    _ => r#"window.__mewDesktopAction?.("zoom-reset")"#,
-                };
-                let _ = window.eval(script);
-            }
-        }
-        "reload" => {
-            show_account(app, &active);
-            if let Some(window) = remote() {
-                let _ = window.eval("location.reload()");
-            }
-        }
-        "back" | "forward" => {
-            show_account(app, &active);
-            if let Some(window) = remote() {
-                let _ = window.eval(if id == "back" {
-                    "history.back()"
-                } else {
-                    "history.forward()"
-                });
-            }
-        }
-        "notification-preview" => {
-            // The check item already toggled itself on click.
-            if let Some(item) = app.try_state::<crate::prefs::PreviewMenuItem>() {
-                if let Ok(checked) = item.0.is_checked() {
-                    if let Err(error) = crate::prefs::set(app, "notification_preview", checked) {
-                        eprintln!("could not save preferences: {error}");
-                    }
-                }
-            }
-        }
+        "show" => show_main(app),
         "settings" => crate::shell::open_settings(app),
         _ => {}
     }
@@ -201,45 +144,16 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     }) {
         eprintln!("could not register notification actions: {error}");
     }
-    let preview = app
-        .state::<std::sync::Mutex<crate::prefs::Prefs>>()
-        .lock()
-        .map(|p| p.notification_preview)
-        .unwrap_or(true);
-    let preview_item = tauri::menu::CheckMenuItemBuilder::with_id(
-        "notification-preview",
-        "Show message previews in notifications",
-    )
-    .checked(preview)
-    .build(app)?;
-    app.manage(crate::prefs::PreviewMenuItem(preview_item.clone()));
     let accounts_menu = SubmenuBuilder::with_id(app, "accounts", "Accounts").build()?;
     app.manage(AccountsMenu(accounts_menu.clone()));
     let menu = MenuBuilder::new(app)
-        .text("show", "Show Messenger")
-        .text("search", "Search chats")
-        .text("new-chat", "New message")
-        .text("next-chat", "Next chat")
-        .text("prev-chat", "Previous chat")
-        .separator()
-        .text("zoom-in", "Zoom photo in")
-        .text("zoom-out", "Zoom photo out")
-        .text("zoom-reset", "Reset photo zoom")
-        .separator()
-        .text("back", "Back")
-        .text("forward", "Forward")
-        .text("reload", "Reload Messenger")
-        .text("account", "Account menu")
-        .text("settings", "Settings…")
+        .text("show", "Open Mewsenger")
         .item(&accounts_menu)
-        .text("logout", "Sign out")
         .separator()
-        .item(&preview_item)
+        .text("settings", "Settings…")
         .separator()
-        .text("hide", "Hide Messenger")
         .text("quit", "Quit")
         .build()?;
-    // Keep the web interface unchanged: commands live in the native tray menu.
     app.on_menu_event(|app, event| dispatch(app, event.id().as_ref()));
     let icon = app.default_window_icon().cloned();
     let mut tray = TrayIconBuilder::with_id("main")

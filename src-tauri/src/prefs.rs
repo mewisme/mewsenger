@@ -227,8 +227,6 @@ pub fn save(app: &AppHandle, prefs: &Prefs) -> std::io::Result<()> {
     std::fs::rename(&tmp, &target)
 }
 
-pub struct PreviewMenuItem(pub tauri::menu::CheckMenuItem<tauri::Wry>);
-
 pub fn apply(mut prefs: Prefs, key: &str, value: bool) -> Result<Prefs, String> {
     match key {
         "notification_preview" => prefs.notification_preview = value,
@@ -258,9 +256,6 @@ pub fn set(app: &AppHandle, key: &str, value: bool) -> Result<Prefs, String> {
     })?;
     *guard = next;
     drop(guard);
-    if let Some(item) = app.try_state::<PreviewMenuItem>() {
-        let _ = item.0.set_checked(next.notification_preview);
-    }
     let _ = app.emit_to("settings", "prefs-changed", next);
     push_to_pages(app, &next);
     if key == "trim_idle_memory" {
