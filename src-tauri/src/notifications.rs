@@ -423,16 +423,21 @@ fn reset_view_state(registry: &mut Registry, account: &str) {
     // A remote page must not reset notification throttling.
 }
 
+/// The badge Windows draws over the taskbar button: a red disc with the
+/// count. Windows shrinks it to about 16 px, so it is drawn at 64 px with a
+/// smooth edge and a margin, which keeps it small beside the app's icon.
 fn unread_icon(count: usize) -> tauri::image::Image<'static> {
-    const W: usize = 32;
-    const H: usize = 32;
-    let mut rgba = vec![0u8; W * H * 4];
-    for y in 0..H {
-        for x in 0..W {
-            let d = (x as i32 - 16).pow(2) + (y as i32 - 16).pow(2);
-            if d <= 14 * 14 {
-                let i = (y * W + x) * 4;
-                rgba[i..i + 4].copy_from_slice(&[213, 35, 49, 255]);
+    const SIZE: usize = 64;
+    const RADIUS: f32 = 24.0;
+    let mut rgba = vec![0u8; SIZE * SIZE * 4];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let dx = x as f32 + 0.5 - SIZE as f32 / 2.0;
+            let dy = y as f32 + 0.5 - SIZE as f32 / 2.0;
+            let coverage = (RADIUS + 0.5 - (dx * dx + dy * dy).sqrt()).clamp(0.0, 1.0);
+            if coverage > 0.0 {
+                let i = (y * SIZE + x) * 4;
+                rgba[i..i + 4].copy_from_slice(&[213, 35, 49, (coverage * 255.0) as u8]);
             }
         }
     }
@@ -456,10 +461,15 @@ fn unread_icon(count: usize) -> tauri::image::Image<'static> {
             _ => [0, 0, 2, 7, 2, 0, 0],
         }
     };
-    let scale = if label.len() == 3 { 2 } else { 3 };
+    // Smaller digits for more of them, so the text stays inside the disc.
+    let scale = match label.len() {
+        1 => 4,
+        2 => 3,
+        _ => 2,
+    };
     let width = label.len() * 4 * scale - scale;
-    let start_x = (W - width) / 2;
-    let start_y = (H - 7 * scale) / 2;
+    let start_x = (SIZE - width) / 2;
+    let start_y = (SIZE - 7 * scale) / 2;
     for (char_index, c) in label.chars().enumerate() {
         for (row, bits) in digit(c).iter().enumerate() {
             for col in 0..3 {
@@ -470,14 +480,14 @@ fn unread_icon(count: usize) -> tauri::image::Image<'static> {
                     for dx in 0..scale {
                         let x = start_x + char_index * 4 * scale + col * scale + dx;
                         let y = start_y + row * scale + dy;
-                        let i = (y * W + x) * 4;
+                        let i = (y * SIZE + x) * 4;
                         rgba[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
                     }
                 }
             }
         }
     }
-    tauri::image::Image::new_owned(rgba, W as u32, H as u32)
+    tauri::image::Image::new_owned(rgba, SIZE as u32, SIZE as u32)
 }
 
 fn parse_session(state: &str) -> Result<bool, String> {
@@ -698,6 +708,32 @@ pub fn account_closed(app: &AppHandle, account: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_taskbar_badge_is_a_small_disc_with_clear_edges_whatever_the_count() {
+        for count in [1, 9, 11, 99, 100] {
+            let icon = super::unread_icon(count);
+            assert_eq!((icon.width(), icon.height()), (64, 64));
+            let pixels = icon.rgba();
+            let alpha = |x: usize, y: usize| pixels[(y * 64 + x) * 4 + 3];
+            // A margin all round, a solid middle, and the corners untouched.
+            assert_eq!(alpha(0, 0), 0);
+            assert_eq!(alpha(63, 32), 0);
+            assert_eq!(alpha(32, 6), 0, "{count}");
+            assert!((0..64).any(|x| alpha(x, 32) == 255));
+            // The text stays inside the disc.
+            for y in 0..64usize {
+                for x in 0..64usize {
+                    let white =
+                        pixels[(y * 64 + x) * 4] == 255 && pixels[(y * 64 + x) * 4 + 1] == 255;
+                    if white {
+                        let (dx, dy) = (x as f32 - 31.5, y as f32 - 31.5);
+                        assert!((dx * dx + dy * dy).sqrt() <= 24.0, "{count}: ({x}, {y})");
+                    }
+                }
+            }
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -752,14 +788,6 @@ mod tests {
         assert!(safe_string("bad\u{0000}title", 20).is_none());
         assert!(safe_string(&"x".repeat(161), 160).is_none());
     }
-    #[test]
-    fn badge_png_source_is_valid_rgba() {
-        let icon = unread_icon(99);
-        assert_eq!(icon.width(), 32);
-        assert_eq!(icon.height(), 32);
-        assert_eq!(icon.rgba().len(), 4096);
-    }
-
     #[test]
     fn unread_starts_unknown_not_zero() {
         let state = NotificationState::default();
