@@ -6,7 +6,6 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// Label of the small view that lists accounts without an open tab.
 pub const TAB_MENU: &str = "tabmenu";
-pub const MAX_ACCOUNTS: usize = 4;
 const MAX_NAME_CHARS: usize = 24;
 const MAX_DISPLAY_CHARS: usize = 80;
 const MAX_PICTURE_BYTES: usize = 40_000;
@@ -82,7 +81,6 @@ pub fn from_json(text: &str) -> Config {
         return Config::default();
     };
     let valid = !config.accounts.is_empty()
-        && config.accounts.len() <= MAX_ACCOUNTS
         && config.accounts[0].id == FIRST
         && config.accounts.iter().all(|a| valid_id(&a.id))
         && config
@@ -111,7 +109,7 @@ pub fn from_json(text: &str) -> Config {
 
 fn valid_id(id: &str) -> bool {
     let digits = id.strip_prefix('a').unwrap_or("");
-    (1..=3).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit())
+    (1..=6).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
 impl Config {
@@ -156,9 +154,6 @@ impl Config {
 
     /// Adds an account, opens its tab and shows it.
     pub fn add(&mut self, name: &str) -> Result<String, String> {
-        if self.accounts.len() >= MAX_ACCOUNTS {
-            return Err("account limit reached".into());
-        }
         let name = valid_name(name)?;
         let id = format!("a{}", self.next_id);
         self.next_id += 1;
@@ -200,17 +195,6 @@ impl Config {
         Ok(changed)
     }
 
-    pub fn rename(&mut self, id: &str, name: &str) -> Result<(), String> {
-        let name = valid_name(name)?;
-        let account = self
-            .accounts
-            .iter_mut()
-            .find(|a| a.id == id)
-            .ok_or("unknown account")?;
-        account.name = name;
-        Ok(())
-    }
-
     /// Deletes the account itself; its tab goes with it.
     pub fn remove(&mut self, id: &str) -> Result<(), String> {
         if id == FIRST {
@@ -237,6 +221,39 @@ impl Config {
         }
         self.active = id.to_string();
         Ok(())
+    }
+
+    /// Whether `id` is an account nobody signed in to, which is not the
+    /// default profile and so can be deleted outright.
+    fn is_anonymous(&self, id: &str) -> bool {
+        id != FIRST
+            && self
+                .account(id)
+                .is_some_and(|account| account.display_name.is_none())
+    }
+
+    /// Closes a tab like `close_tab`; an account that never signed in goes
+    /// with it. True when the account was deleted.
+    pub fn close_and_discard(&mut self, id: &str) -> Result<bool, String> {
+        let discard = self.is_anonymous(id);
+        self.close_tab(id)?;
+        if discard {
+            self.remove(id)?;
+        }
+        Ok(discard)
+    }
+
+    /// Deletes accounts that never signed in and have no tab, such as one
+    /// left over from a crash; returns their ids.
+    pub fn prune_anonymous(&mut self) -> Vec<String> {
+        let stale = self
+            .accounts
+            .iter()
+            .filter(|a| self.is_anonymous(&a.id) && !self.is_open(&a.id))
+            .map(|a| a.id.clone())
+            .collect::<Vec<_>>();
+        self.accounts.retain(|a| !stale.contains(&a.id));
+        stale
     }
 
     /// Moves a tab so it ends at `index` (clamped) in the tab order.
@@ -332,10 +349,20 @@ fn path(app: &AppHandle) -> Option<PathBuf> {
 }
 
 pub fn load(app: &AppHandle) -> Config {
-    path(app)
+    let mut config = path(app)
         .and_then(|p| std::fs::read_to_string(p).ok())
         .map(|text| from_json(&text))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let stale = config.prune_anonymous();
+    if !stale.is_empty() {
+        if let Err(error) = save(app, &config) {
+            eprintln!("could not save accounts: {error}");
+        }
+        for id in &stale {
+            remove_data_directory(app, id);
+        }
+    }
+    config
 }
 
 pub fn save(app: &AppHandle, config: &Config) -> std::io::Result<()> {
@@ -469,7 +496,7 @@ pub(crate) fn announce(app: &AppHandle, config: &Config) {
 pub fn activate(app: &AppHandle, id: &str) -> Result<Config, String> {
     let (_, config) = mutate(app, |c| c.open_tab(id))?;
     announce(app, &config);
-    crate::shell::sync_tabs(app, || {});
+    crate::shell::show_tab(app, || {});
     Ok(config)
 }
 
@@ -494,20 +521,6 @@ pub fn add_account(
     crate::desktop::sync_accounts_menu(&app);
     announce(&app, &config);
     crate::shell::sync_tabs(&app, || {});
-    Ok(config)
-}
-
-#[tauri::command]
-pub fn rename_account(
-    app: AppHandle,
-    webview: tauri::Webview,
-    id: String,
-    name: String,
-) -> Result<Config, String> {
-    settings_view(&webview)?;
-    let (_, config) = mutate(&app, |c| c.rename(&id, &name))?;
-    crate::desktop::sync_accounts_menu(&app);
-    announce(&app, &config);
     Ok(config)
 }
 
@@ -553,14 +566,21 @@ pub fn open_account(app: AppHandle, webview: tauri::Webview, id: String) -> Resu
     activate(&app, &id)
 }
 
-/// Closes the tab only: the account, its login and its data stay.
+/// Closes the tab. A signed-in account, its login and its data stay; one that
+/// never signed in is deleted with its profile.
 fn close(app: &AppHandle, id: &str) -> Result<Config, String> {
-    let (_, config) = mutate(app, |c| c.close_tab(id))?;
+    let (discarded, config) = mutate(app, |c| c.close_and_discard(id))?;
+    if discarded {
+        crate::desktop::sync_accounts_menu(app);
+    }
     announce(app, &config);
     let cleanup_app = app.clone();
     let id = id.to_string();
     crate::shell::sync_tabs(app, move || {
         crate::notifications::account_closed(&cleanup_app, &id);
+        if discarded {
+            remove_data_directory(&cleanup_app, &id);
+        }
     });
     Ok(config)
 }
@@ -683,7 +703,7 @@ mod tests {
             "messenger-a1x",
             "messenger-",
             "messenger-a",
-            "messenger-a1234",
+            "messenger-a1234567",
             "status-a1",
             "messenger",
             "settings",
@@ -696,13 +716,12 @@ mod tests {
     }
 
     #[test]
-    fn accounts_are_limited_and_names_validated() {
+    fn accounts_are_not_limited_and_names_validated() {
         let mut config = Config::default();
-        for n in 2..=4 {
+        for n in 2..=30 {
             assert_eq!(config.add(&format!("Acc {n}")).unwrap(), format!("a{n}"));
         }
-        assert!(config.add("Five").is_err());
-        assert_eq!(config.accounts.len(), 4);
+        assert_eq!(config.accounts.len(), 30);
         let mut config = Config::default();
         assert!(config.add("   ").is_err());
         assert!(config.add(&"x".repeat(25)).is_err());
@@ -847,12 +866,42 @@ mod tests {
     }
 
     #[test]
-    fn rename_validates_and_needs_a_known_account() {
-        let mut config = Config::default();
-        assert!(config.rename("a9", "x").is_err());
-        assert!(config.rename("a1", "").is_err());
-        config.rename("a1", " Home ").unwrap();
-        assert_eq!(config.accounts[0].name, "Home");
+    fn closing_a_tab_that_never_signed_in_deletes_the_account() {
+        let mut config = two();
+        assert_eq!(config.close_and_discard("a2"), Ok(true));
+        assert_eq!(config.accounts.len(), 1);
+        assert_eq!(config.open, vec!["a1"]);
+
+        let mut config = two();
+        config.set_display_name("a2", "Ada", None).unwrap();
+        assert_eq!(config.close_and_discard("a2"), Ok(false));
+        assert_eq!(config.accounts.len(), 2);
+        assert_eq!(config.closed()[0].id, "a2");
+    }
+
+    #[test]
+    fn the_default_profile_and_the_last_tab_are_never_discarded() {
+        let mut config = two();
+        assert_eq!(config.close_and_discard("a1"), Ok(false));
+        assert!(config.account("a1").is_some());
+        assert!(config.close_and_discard("a2").is_err());
+        assert!(config.account("a2").is_some());
+    }
+
+    #[test]
+    fn leftover_anonymous_accounts_without_a_tab_are_pruned() {
+        let mut config = two();
+        config.add("Third").unwrap();
+        config.set_display_name("a3", "Grace", None).unwrap();
+        config.close_tab("a2").unwrap();
+        config.close_tab("a3").unwrap();
+        assert_eq!(config.prune_anonymous(), vec!["a2"]);
+        let ids = config
+            .accounts
+            .iter()
+            .map(|a| a.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["a1", "a3"]);
     }
 
     #[test]
