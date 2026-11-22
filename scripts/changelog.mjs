@@ -61,7 +61,7 @@ export function renderSection({ tag, previous, date, commits }) {
 }
 
 export function renderChangelog(sections) {
-  return `# Changelog\n\nGenerated from the commit history by `pnpm changelog` when a release is prepared.\n\n${sections.join("\n")}`.replace(/\n+$/, "\n");
+  return `# Changelog\n\nGenerated from the commit history by pnpm changelog when a release is prepared.\n\n${sections.join("\n")}`.replace(/\n+$/, "\n");
 }
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
