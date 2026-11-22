@@ -30,6 +30,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "version:check": "node scripts/verify-version.mjs",
+    "changelog": "node scripts/changelog.mjs --write",
     "preview": "vite preview",
     "tauri": "tauri",
     "app-dev": "tauri dev",

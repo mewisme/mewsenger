@@ -24,14 +24,23 @@ export function verifyVersions({ packageVersion, tauriVersion, rustVersion, lock
   return packageVersion;
 }
 
+/** CHANGELOG.md must already describe the version being released. */
+export function verifyChangelog(changelog, version) {
+  if (!changelog.includes(`## [${version}]`)) {
+    throw new Error(`CHANGELOG.md has no section for ${version}; run pnpm changelog`);
+  }
+}
+
 export function verifyRepository(root = process.cwd()) {
   const read = (name) => readFileSync(resolve(root, name), "utf8");
-  return verifyVersions({
+  const version = verifyVersions({
     packageVersion: JSON.parse(read("package.json")).version,
     tauriVersion: JSON.parse(read("src-tauri/tauri.conf.json")).version,
     rustVersion: readRustPackageVersion(read("src-tauri/Cargo.toml")),
     lockedVersion: readLockedPackageVersion(read("src-tauri/Cargo.lock")),
   });
+  verifyChangelog(read("CHANGELOG.md"), version);
+  return version;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -3,6 +3,7 @@ import {
   readRustPackageVersion,
   readLockedPackageVersion,
   verifyVersions,
+  verifyChangelog,
   verifyRepository,
 } from "./verify-version.mjs";
 
@@ -32,4 +33,9 @@ test("version verification rejects malformed or divergent metadata", () => {
   expect(() => verifyVersions({ ...consistent, rustVersion: "0.1.1" })).toThrow();
   expect(() => verifyVersions({ ...consistent, lockedVersion: "0.1.1" })).toThrow();
   expect(() => verifyVersions({ ...consistent, packageVersion: "latest" })).toThrow();
+});
+
+test("the changelog must have a section for the version", () => {
+  expect(() => verifyChangelog("## [0.2.1](x) - 2026-01-01\n", "0.2.1")).not.toThrow();
+  expect(() => verifyChangelog("## [0.2.0](x) - 2026-01-01\n", "0.2.1")).toThrow(/pnpm changelog/);
 });
