@@ -7,6 +7,7 @@
 //   mewPrefs.onChange(fn)    fn(values) after any change; returns a function that stops it
 const mewPrefs = (() => {
   const values = {
+    theme: 'system',
     blockTyping: false,
     hideAvatars: false,
     redactMode: false,
@@ -20,7 +21,7 @@ const mewPrefs = (() => {
   window.__mewApplyPrefs = (next) => {
     if (!next || typeof next !== 'object') return;
     for (const key of Object.keys(values)) {
-      if (typeof next[key] === 'boolean') values[key] = next[key];
+      if (typeof next[key] === typeof values[key]) values[key] = next[key];
     }
     for (const listener of [...listeners]) {
       try { listener({ ...values }); } catch { /* One listener failing must not stop the others. */ }

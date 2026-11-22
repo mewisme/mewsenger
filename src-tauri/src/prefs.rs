@@ -163,6 +163,7 @@ impl Prefs {
     /// (window.__MEW_PREFS); keys follow inject/26-prefs.js.
     pub fn page_json(&self) -> String {
         serde_json::json!({
+            "theme": self.theme,
             "blockTyping": self.block_typing,
             "hideAvatars": self.hide_avatars,
             "redactMode": self.redact_mode,
@@ -319,6 +320,7 @@ pub fn set_theme(app: &AppHandle, value: &str) -> Result<Prefs, String> {
     drop(guard);
     apply_theme(app, theme);
     let _ = app.emit_to("settings", "prefs-changed", next);
+    push_to_pages(app, &next);
     Ok(next)
 }
 
@@ -511,7 +513,8 @@ mod tests {
         assert_eq!(value["spellCheck"], false);
         assert_eq!(value["autoRecover"], true);
         assert_eq!(value["readAhead"], false);
-        assert_eq!(value.as_object().unwrap().len(), 7);
+        assert_eq!(value.as_object().unwrap().len(), 8);
+        assert_eq!(value["theme"], "system");
         assert!(page_script(&prefs).starts_with("window.__MEW_PREFS = {"));
     }
 

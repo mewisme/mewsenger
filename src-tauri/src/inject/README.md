@@ -37,6 +37,7 @@ a module: do not declare a name an earlier part already uses.
 | 80-privacy-typing | Hide that you are typing (edits Messenger's outgoing typing requests) |
 | 82-privacy-avatars | Pictures as initials |
 | 84-privacy-redact | Names, messages and photos covered |
+| 86-theme | Sets Messenger's own appearance (light, dark, system) from the theme choice |
 | 90-recover | Reloads a page that woke from sleep, lost its connection or is stuck |
 | 92-read-ahead | Loads the newest messages of the top chats before they are opened |
 | 94-downloads | Saves photo and video downloads from Facebook's CDN from the page |
