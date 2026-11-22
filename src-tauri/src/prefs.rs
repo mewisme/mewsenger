@@ -271,10 +271,8 @@ pub fn set(app: &AppHandle, key: &str, value: bool) -> Result<Prefs, String> {
 /// Applies the saved colour scheme to every window and view.
 pub fn apply_theme(app: &AppHandle, theme: ThemePref) {
     app.set_theme(theme.window_theme());
-    for (label, webview) in app.webviews() {
-        if label.starts_with("messenger-") {
-            apply_webview_theme(&webview, theme);
-        }
+    for webview in app.webviews().values() {
+        apply_webview_theme(webview, theme);
     }
 }
 
