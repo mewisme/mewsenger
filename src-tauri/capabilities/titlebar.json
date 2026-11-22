@@ -22,6 +22,7 @@
     "allow-move-tab",
     "allow-tab-shortcut",
     "allow-show-settings",
+    "allow-select-settings",
     "allow-reveal-last-download",
     "allow-get-update-state",
     "allow-check-update",

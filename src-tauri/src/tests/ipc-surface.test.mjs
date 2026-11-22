@@ -49,7 +49,7 @@ test('local views receive exactly the commands they use', () => {
   assert.equal(byId('default'), undefined);
   assert.equal(byId('desktop-capability'), undefined);
   for (const permission of [
-    'allow-show-settings', 'allow-reveal-last-download', 'allow-get-update-state',
+    'allow-show-settings', 'allow-select-settings', 'allow-reveal-last-download', 'allow-get-update-state',
     'allow-check-update', 'allow-install-update',
   ]) {
     assert.ok(byId('titlebar').permissions.includes(permission), permission);

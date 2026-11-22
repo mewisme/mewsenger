@@ -202,22 +202,27 @@ test("a message for a tab behind the active one animates that tab until it is op
   expect(screen.getByRole("tab", { name: "Spare" })).toBeTruthy();
 });
 
-test("an open Settings shows as the selected tab, and its x closes it", async () => {
+test("an open Settings keeps its tab; it is selected only while it is shown", async () => {
   render(<AccountTabs initial={VIEW} />);
   const state = runtime.listen.mock.calls.find(([name]) => name === "settings-state")![1] as
     (event: { payload: unknown }) => void;
   expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull();
-  act(() => state({ payload: true }));
+  act(() => state({ payload: { open: true, shown: true } }));
   const settings = await screen.findByRole("tab", { name: "Settings" });
   expect(settings.getAttribute("aria-selected")).toBe("true");
-  // The account that was in front no longer looks selected.
   expect(screen.getByRole("tab", { name: "Home" }).getAttribute("aria-selected")).toBe("false");
+  // Another tab takes the screen; Settings stays open behind it.
+  act(() => state({ payload: { open: true, shown: false } }));
+  expect(screen.getByRole("tab", { name: "Settings" }).getAttribute("aria-selected")).toBe("false");
+  expect(screen.getByRole("tab", { name: "Home" }).getAttribute("aria-selected")).toBe("true");
+  runtime.invoke.mockClear();
+  fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+  expect(runtime.invoke).toHaveBeenCalledWith("select_settings");
   runtime.invoke.mockClear();
   fireEvent.click(screen.getByRole("button", { name: "Close Settings" }));
   expect(runtime.invoke).toHaveBeenCalledWith("show_settings");
-  act(() => state({ payload: false }));
+  act(() => state({ payload: { open: false, shown: false } }));
   expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull();
-  expect(screen.getByRole("tab", { name: "Home" }).getAttribute("aria-selected")).toBe("true");
-  act(() => state({ payload: "yes" }));
+  act(() => state({ payload: true }));
   expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull();
 });

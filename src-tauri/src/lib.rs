@@ -67,6 +67,7 @@ pub fn run() {
             notifications::notification_event,
             notifications::test_notification,
             shell::show_settings,
+            shell::select_settings,
             prefs::get_preferences,
             prefs::set_preference,
             prefs::set_theme_preference,

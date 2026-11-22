@@ -42,6 +42,7 @@ a module: do not declare a name an earlier part already uses.
 | 92-read-ahead | Loads the newest messages of the top chats before they are opened |
 | 94-downloads | Saves photo and video downloads from Facebook's CDN from the page |
 | 96-panes | Resizable chat list and details |
+| 97-wide | Lifts Facebook's page width cap so wide screens are filled |
 | 98-selection | Spell check switch, double-click to reply |
 | 99-context-menu | Right-click on a chat or message opens Messenger's own menu |
 

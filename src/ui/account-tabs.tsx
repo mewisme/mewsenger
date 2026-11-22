@@ -93,7 +93,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
   const [order, setOrder] = useState<string[] | null>(null);
   const [dragView, setDragView] = useState<DragView | null>(null);
   const [alerts, setAlerts] = useState<Record<string, TabAlert>>({});
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState({ open: false, shown: false });
   const plus = useRef<HTMLButtonElement>(null);
   const holders = useRef(new Map<string, HTMLElement>());
   const drag = useRef<DragState | null>(null);
@@ -136,7 +136,10 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
       setView({ accounts: payload.accounts.map(shown), open: payload.open, active: payload.active });
     });
     subscribe("settings-state", (payload) => {
-      if (typeof payload === "boolean") setSettingsOpen(payload);
+      const state = payload as { open?: unknown; shown?: unknown } | null;
+      if (typeof state === "object" && state !== null && typeof state.open === "boolean" && typeof state.shown === "boolean") {
+        setSettings({ open: state.open, shown: state.shown });
+      }
     });
     subscribe("tab-alert", (payload) => {
       if (isTabAlert(payload)) setAlerts((current) => ({ ...current, [payload.account]: { title: payload.title, body: payload.body } }));
@@ -270,7 +273,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
 
   return (
     <Tabs
-      value={settingsOpen ? "" : view.active}
+      value={settings.shown ? "" : view.active}
       onValueChange={(id) => select(id, false)}
       className="h-full min-w-0 items-end gap-0.5 pl-1 data-horizontal:flex-row"
     >
@@ -279,7 +282,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
         className="h-9 w-auto min-w-0 items-end justify-start gap-0.5 rounded-none bg-transparent p-0"
       >
         {tabs.map((account, index) => {
-          const selected = !settingsOpen && account.id === view.active;
+          const selected = !settings.shown && account.id === view.active;
           const alert = selected ? undefined : alerts[account.id];
           const dragging = dragView?.id === account.id;
           return (
@@ -302,7 +305,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
               }}
               style={{ transform: translation(index, dragView) }}
               className={cn(
-                "group/tab relative h-9 w-40 min-w-[72px] max-w-40 shrink touch-none",
+                "@container/tab group/tab relative h-9 w-40 min-w-9 max-w-40 shrink touch-none",
                 selected && "-mb-px h-[calc(2.25rem+1px)]",
                 dragView && !dragging && "transition-transform duration-150",
                 dragging && "z-10 shadow-md",
@@ -324,6 +327,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
                   "h-full w-full flex-none cursor-default justify-start gap-2 overflow-hidden rounded-none border-0 px-3 text-xs font-normal shadow-none transition-colors after:hidden",
                   "bg-transparent data-active:bg-transparent data-active:shadow-none dark:bg-transparent dark:data-active:border-transparent dark:data-active:bg-transparent",
                   closable && "pr-7",
+                  "@max-[71px]/tab:justify-center @max-[71px]/tab:px-0",
                   selected
                     ? "bg-background pb-px text-foreground data-active:bg-background dark:bg-background dark:data-active:bg-background"
                     : "text-muted-foreground hover:bg-muted",
@@ -332,12 +336,12 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
                 <AccountAvatar account={account}
                   className={cn("size-5", alert && "animate-pulse ring-2 ring-primary")} />
                 {alert ? (
-                  <span className="tab-alert relative h-5 min-w-0 flex-1 overflow-hidden text-left">
+                  <span className="tab-alert relative h-5 min-w-0 flex-1 overflow-hidden text-left @max-[71px]/tab:hidden">
                     <span className="tab-alert-name">{accountLabel(account, t)}</span>
                     <span className="tab-alert-message font-medium text-foreground">{alert.title}: {alert.body}</span>
                   </span>
                 ) : (
-                  <span className={cn("min-w-0 flex-1 truncate text-left", !account.name.trim() && "text-muted-foreground")}>
+                  <span className={cn("min-w-0 flex-1 truncate text-left @max-[71px]/tab:hidden", !account.name.trim() && "text-muted-foreground")}>
                     {accountLabel(account, t)}
                   </span>
                 )}
@@ -356,7 +360,9 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
                   className={cn(
                     "absolute right-2 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center transition-colors hover:bg-foreground/10",
                     "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    selected ? "opacity-100" : "opacity-0 group-hover/tab:opacity-100",
+                    // Too narrow for a label: the picture turns into the close button on hover.
+                    "@max-[71px]/tab:right-1/2 @max-[71px]/tab:size-5 @max-[71px]/tab:translate-x-1/2 @max-[71px]/tab:rounded-full @max-[71px]/tab:bg-muted",
+                    selected ? "opacity-100 @max-[71px]/tab:opacity-0 @max-[71px]/tab:group-hover/tab:opacity-100" : "opacity-0 group-hover/tab:opacity-100",
                   )}
                 >
                   <X aria-hidden="true" className="size-3" />
@@ -365,18 +371,30 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
             </div>
           );
         })}
-        {settingsOpen && (
-          <div className="group/tab relative -mb-px h-[calc(2.25rem+1px)] w-40 min-w-[72px] max-w-40 shrink">
-            <div role="tab" aria-selected="true" aria-label={t("titlebar.settings")} title={t("titlebar.settings")}
-              className="flex h-full w-full cursor-default items-center gap-2 overflow-hidden bg-background px-3 pb-px pr-7 text-xs text-foreground">
+        {settings.open && (
+          <div className={cn(
+            "@container/tab group/tab relative h-9 w-40 min-w-9 max-w-40 shrink",
+            settings.shown && "-mb-px h-[calc(2.25rem+1px)]",
+          )}>
+            <div role="tab" aria-selected={settings.shown} aria-label={t("titlebar.settings")} title={t("titlebar.settings")}
+              onClick={() => void invoke("select_settings").catch(() => {})}
+              className={cn(
+                "flex h-full w-full cursor-default items-center gap-2 overflow-hidden px-3 pr-7 text-xs transition-colors",
+                "@max-[71px]/tab:justify-center @max-[71px]/tab:px-0",
+                settings.shown ? "bg-background pb-px text-foreground" : "text-muted-foreground hover:bg-muted",
+              )}>
               <Settings aria-hidden="true" className="size-4 shrink-0" />
-              <span className="min-w-0 flex-1 truncate text-left">{t("titlebar.settings")}</span>
+              <span className="min-w-0 flex-1 truncate text-left @max-[71px]/tab:hidden">{t("titlebar.settings")}</span>
             </div>
             <button
               type="button"
               aria-label={t("tabs.closeSettings")}
               onClick={() => void invoke("show_settings").catch(() => {})}
-              className="absolute right-2 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center transition-colors hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={cn(
+                "absolute right-2 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center transition-colors hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "@max-[71px]/tab:right-1/2 @max-[71px]/tab:size-5 @max-[71px]/tab:translate-x-1/2 @max-[71px]/tab:rounded-full @max-[71px]/tab:bg-muted",
+                settings.shown ? "opacity-100 @max-[71px]/tab:opacity-0 @max-[71px]/tab:group-hover/tab:opacity-100" : "opacity-0 group-hover/tab:opacity-100",
+              )}
             >
               <X aria-hidden="true" className="size-3" />
             </button>

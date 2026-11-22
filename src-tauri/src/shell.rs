@@ -321,9 +321,14 @@ fn reconcile(app: &AppHandle) -> tauri::Result<()> {
     }
     if overlay {
         add_settings_overlay(&main)?;
+        if !SETTINGS_SHOWN.load(Ordering::Acquire) {
+            if let Some(view) = settings_overlay(&main) {
+                let _ = view.hide();
+            }
+        }
     }
     resize(&main)?;
-    if settings_overlay(&main).is_none() {
+    if !SETTINGS_SHOWN.load(Ordering::Acquire) {
         if let Some(webview) = app.get_webview(&accounts::remote_label(config.shown_account())) {
             let _ = webview.set_focus();
         }
@@ -339,7 +344,7 @@ pub fn sync_tabs(app: &AppHandle, after: impl FnOnce() + Send + 'static) {
 }
 
 /// Like `sync_tabs` for switching to a tab: Settings drawn over the page is
-/// closed first, so the page that was asked for is what shows.
+/// hidden first, so the page that was asked for is what shows.
 pub fn show_tab(app: &AppHandle, after: impl FnOnce() + Send + 'static) {
     spawn_sync(app, true, after);
 }
@@ -351,9 +356,9 @@ fn spawn_sync(app: &AppHandle, dismiss_settings: bool, after: impl FnOnce() + Se
         if dismiss_settings {
             if let Some(main) = app.get_window("main") {
                 if let Some(overlay) = settings_overlay(&main) {
-                    let _ = overlay.close();
-                    wait_until(|| settings_overlay(&main).is_none());
-                    announce_settings(&app, false);
+                    // Settings stays open behind the page, with its tab.
+                    let _ = overlay.hide();
+                    announce_settings(&app, true, false);
                 }
             }
         }
@@ -593,9 +598,16 @@ fn settings_overlay(window: &Window) -> Option<tauri::Webview> {
         .find(|v| v.label() == SETTINGS)
 }
 
-/// Tells the title bar whether Settings is open, so it can show its tab.
-fn announce_settings(app: &AppHandle, open: bool) {
-    let _ = app.emit_filter("settings-state", open, |target| {
+/// Whether Settings is on screen; it can stay open, with its tab, while a
+/// Messenger page is shown instead.
+static SETTINGS_SHOWN: AtomicBool = AtomicBool::new(false);
+
+/// Tells the title bar whether Settings is open and whether it is shown, so
+/// it can draw its tab.
+fn announce_settings(app: &AppHandle, open: bool, shown: bool) {
+    SETTINGS_SHOWN.store(shown, Ordering::Release);
+    let payload = serde_json::json!({ "open": open, "shown": shown });
+    let _ = app.emit_filter("settings-state", payload, |target| {
         matches!(target, tauri::EventTarget::Webview { label } if label.starts_with("titlebar-"))
     });
 }
@@ -609,8 +621,21 @@ pub fn show_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), Stri
     Ok(())
 }
 
-/// The title bar's gear and the Settings tab: closes Settings when it is
-/// open, opens it otherwise.
+/// Brings an open Settings back over the page (its tab was clicked).
+#[tauri::command]
+pub fn select_settings(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    if !local_webview(&webview, &[LocalKind::Titlebar]) {
+        return Err("title bar required".into());
+    }
+    if let Some(overlay) = app.get_window("main").as_ref().and_then(settings_overlay) {
+        let _ = overlay.show();
+        let _ = overlay.set_focus();
+        announce_settings(&app, true, true);
+    }
+    Ok(())
+}
+
+/// The title bar's gear: closes Settings when it is open, opens it otherwise.
 fn toggle_settings(app: &AppHandle) {
     let open = app
         .get_window("main")
@@ -641,7 +666,9 @@ pub fn open_settings(app: &AppHandle) {
         return;
     };
     if let Some(overlay) = settings_overlay(&main) {
+        let _ = overlay.show();
         let _ = overlay.set_focus();
+        announce_settings(app, true, true);
         return;
     }
     // WebView2 creation from a synchronous callback can block the native
@@ -654,7 +681,7 @@ pub fn open_settings(app: &AppHandle) {
         let _opening = SettingsOpening;
         if settings_overlay(&main).is_none() {
             match add_settings_overlay(&main) {
-                Ok(()) => announce_settings(&app, true),
+                Ok(()) => announce_settings(&app, true, true),
                 Err(error) => eprintln!("could not open settings: {error}"),
             }
         }
@@ -666,7 +693,7 @@ pub fn close_settings(app: &AppHandle) {
     std::thread::spawn(move || {
         if let Some(overlay) = app.get_window("main").as_ref().and_then(settings_overlay) {
             let _ = overlay.close();
-            announce_settings(&app, false);
+            announce_settings(&app, false, false);
         }
     });
 }

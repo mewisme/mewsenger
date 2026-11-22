@@ -36,6 +36,7 @@ fn main() {
             "notification_event",
             "test_notification",
             "show_settings",
+            "select_settings",
             "get_preferences",
             "set_preference",
             "set_theme_preference",

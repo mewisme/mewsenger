@@ -153,7 +153,7 @@ export function Settings({ version }: { version: string }) {
             <TabsList variant="line" aria-label={t("settings.title")}
               className="h-11 w-max gap-1 p-0">
               {TABS.map(({ value, icon: Icon, label }) => (
-                <TabsTrigger key={value} value={value} className="flex-none px-3">
+                <TabsTrigger key={value} value={value} className="flex-none px-3 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0">
                   <Icon aria-hidden="true" className="size-4" />
                   {t(label)}
                 </TabsTrigger>
