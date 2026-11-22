@@ -226,3 +226,16 @@ test("an open Settings keeps its tab; it is selected only while it is shown", as
   act(() => state({ payload: true }));
   expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull();
 });
+
+test("clicking the tab that is already shown does nothing, so the page does not flash", () => {
+  render(<AccountTabs initial={VIEW} />);
+  runtime.invoke.mockClear();
+  fireEvent.click(screen.getByRole("tab", { name: "Home" }));
+  expect(runtime.invoke).not.toHaveBeenCalledWith("open_account", expect.anything());
+  // With Settings in front the same click brings the account's page back.
+  const state = runtime.listen.mock.calls.find(([name]) => name === "settings-state")![1] as
+    (event: { payload: unknown }) => void;
+  act(() => state({ payload: { open: true, shown: true } }));
+  fireEvent.click(screen.getByRole("tab", { name: "Home" }));
+  expect(runtime.invoke).toHaveBeenCalledWith("open_account", { id: "a1" });
+});

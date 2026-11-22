@@ -316,7 +316,7 @@ export function AccountTabs({ initial }: { initial: TabsView }) {
                 aria-label={alert ? t("tabs.newMessage", { name: accountLabel(account, t) }) : accountLabel(account, t)}
                 title={alert ? `${alert.title}: ${alert.body}` : accountLabel(account, t)}
                 onMouseDown={onMouseDown}
-                onClick={() => select(account.id, true)}
+                onClick={() => select(account.id, settings.shown)}
                 onAuxClick={(event) => {
                   if (event.button === 1) {
                     event.preventDefault();
