@@ -147,6 +147,34 @@ test('focuses the composer after clicking a chat navigation link', () => {
   assert.equal(field.focused, 2);
 });
 
+test('clicking the chat that is already open puts the cursor back in the message box', () => {
+  const p = page();
+  const field = new p.Element();
+  p.state.field = field;
+  p.flush();
+  assert.equal(field.focused, 1);
+  // The cursor went elsewhere, then the open chat is clicked in the list.
+  const navLink = new p.Element();
+  navLink.href = 'https://www.messenger.com/t/123';
+  p.document.activeElement = navLink;
+  p.fire('document:click', { target: navLink });
+  p.flush();
+  assert.equal(field.focused, 2);
+});
+
+test('a click that is not on a chat leaves the focus alone', () => {
+  const p = page();
+  const field = new p.Element();
+  p.state.field = field;
+  p.flush();
+  const other = new p.Element();
+  p.document.activeElement = other;
+  p.fire('document:click', { target: other });
+  p.flush();
+  assert.equal(field.focused, 1);
+  assert.equal(p.document.activeElement, other);
+});
+
 test('Ctrl+K focuses search; Ctrl+Alt+Down skips active composer', () => {
   const p = page();
   const search = new p.Element();
