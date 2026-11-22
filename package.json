@@ -1,7 +1,7 @@
 {
   "name": "mewsenger",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A fast, native Windows desktop client for Messenger with multiple accounts, native notifications and privacy tools.",
   "author": "Mew",
   "license": "MIT",
